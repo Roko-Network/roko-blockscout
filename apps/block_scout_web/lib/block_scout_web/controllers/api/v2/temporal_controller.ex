@@ -68,6 +68,39 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
     end
   end
 
+  @doc """
+  Returns the temporal metadata for a specific block number.
+
+  Proxies `temporal_getBlockMetadata` to the Roko node.
+  Returns the block's nanosecond-precision temporal timestamp.
+  """
+  @spec block_metadata(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def block_metadata(conn, %{"block_number_param" => block_number_str}) do
+    case Integer.parse(block_number_str) do
+      {block_number, _} ->
+        case rpc_call("temporal_getBlockMetadata", [block_number]) do
+          {:ok, result} -> json(conn, result)
+          {:error, reason} -> conn |> put_status(502) |> json(%{error: reason})
+        end
+
+      :error ->
+        conn |> put_status(400) |> json(%{error: "invalid block number"})
+    end
+  end
+
+  @doc """
+  Returns recent wait times from the fee-priority queue.
+
+  Proxies `temporal_getRecentWaitTimes` to the Roko node.
+  """
+  @spec recent_wait_times(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def recent_wait_times(conn, _params) do
+    case rpc_call("temporal_getRecentWaitTimes", []) do
+      {:ok, result} -> json(conn, result)
+      {:error, reason} -> conn |> put_status(502) |> json(%{error: reason})
+    end
+  end
+
   # Makes a JSON-RPC POST request to the configured Roko node endpoint.
   # Returns {:ok, result} on success or {:error, reason_string} on failure.
   @spec rpc_call(String.t(), list()) :: {:ok, term()} | {:error, String.t()}
