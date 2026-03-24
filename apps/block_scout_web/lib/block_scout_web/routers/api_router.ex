@@ -501,6 +501,12 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
       get("/csv", V2.AdvancedFilterController, :list_csv)
       get("/methods", V2.AdvancedFilterController, :list_methods)
     end
+    scope "/temporal" do
+      get("/watermark", V2.TemporalController, :watermark)
+      get("/consensus-time", V2.TemporalController, :consensus_time)
+      get("/queue-stats", V2.TemporalController, :queue_stats)
+      get("/transactions/:transaction_hash_param/timestamp", V2.TemporalController, :transaction_timestamp)
+    end
   end
 
   scope "/v1/graphql" do
