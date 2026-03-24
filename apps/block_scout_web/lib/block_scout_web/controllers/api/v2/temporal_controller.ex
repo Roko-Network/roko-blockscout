@@ -37,8 +37,16 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
   @spec consensus_time(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def consensus_time(conn, _params) do
     case rpc_call("temporal_getConsensusTime", []) do
-      {:ok, result} -> json(conn, result)
-      {:error, reason} -> conn |> put_status(502) |> json(%{error: reason})
+      {:ok, result} ->
+        # Record sample for quality chart history
+        quality = result["timeQuality"] || 0
+        converged = result["convergenceState"] == "Converged"
+        peer_count = result["peerCount"] || 0
+        BlockScoutWeb.TemporalQualitySampler.record_sample(quality, converged, peer_count, 0)
+        json(conn, result)
+
+      {:error, reason} ->
+        conn |> put_status(502) |> json(%{error: reason})
     end
   end
 
@@ -86,6 +94,19 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
       :error ->
         conn |> put_status(400) |> json(%{error: "invalid block number"})
     end
+  end
+
+  @doc """
+  Returns time quality history for chart display.
+
+  Returns up to 24 hours of samples collected every ~6 seconds.
+  Each sample contains: timestamp (ms), quality (0-10000), converged (bool),
+  peer_count, and watermark.
+  """
+  @spec quality_chart(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def quality_chart(conn, _params) do
+    samples = BlockScoutWeb.TemporalQualitySampler.get_history()
+    json(conn, %{chart_data: samples})
   end
 
   @doc """
