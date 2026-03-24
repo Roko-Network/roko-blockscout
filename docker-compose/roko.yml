@@ -1,0 +1,67 @@
+services:
+  redis-db:
+    extends:
+      file: ./services/redis.yml
+      service: redis-db
+
+  db-init:
+    extends:
+      file: ./services/db.yml
+      service: db-init
+
+  db:
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    extends:
+      file: ./services/db.yml
+      service: db
+
+  backend:
+    depends_on:
+      - db
+      - redis-db
+    image: ghcr.io/blockscout/blockscout:latest
+    pull_policy: always
+    restart: always
+    stop_grace_period: 5m
+    container_name: 'backend'
+    command: sh -c "bin/blockscout eval \"Elixir.Explorer.ReleaseTasks.create_and_migrate()\" && bin/blockscout start"
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    env_file:
+      - ./envs/common-blockscout-roko.env
+    volumes:
+      - ./logs/:/app/logs/
+      - ./dets/:/app/dets/
+    links:
+      - db:database
+    environment:
+      ETHEREUM_JSONRPC_VARIANT: 'geth'
+
+  frontend:
+    depends_on:
+      - backend
+    image: ghcr.io/blockscout/frontend:latest
+    pull_policy: always
+    restart: always
+    container_name: 'frontend'
+    env_file:
+      - ./envs/common-frontend-roko.env
+
+  proxy:
+    depends_on:
+      - backend
+      - frontend
+    image: nginx
+    container_name: proxy
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    volumes:
+      - "./proxy-roko:/etc/nginx/templates"
+    environment:
+      BACK_PROXY_PASS: http://backend:4000
+      FRONT_PROXY_PASS: http://frontend:3000
+    ports:
+      - "14000:80"
+      - "14001:8080"
