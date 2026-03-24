@@ -505,7 +505,9 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
       get("/watermark", V2.TemporalController, :watermark)
       get("/consensus-time", V2.TemporalController, :consensus_time)
       get("/queue-stats", V2.TemporalController, :queue_stats)
+      get("/recent-wait-times", V2.TemporalController, :recent_wait_times)
       get("/transactions/:transaction_hash_param/timestamp", V2.TemporalController, :transaction_timestamp)
+      get("/blocks/:block_number_param/metadata", V2.TemporalController, :block_metadata)
     end
   end
 
