@@ -21,6 +21,9 @@ services:
     depends_on:
       - db
       - redis-db
+    # Use stock Blockscout backend for now. Custom temporal endpoints
+    # require building from source (docker/Dockerfile in repo root).
+    # To build custom: change to build: context: .. dockerfile: docker/Dockerfile
     image: ghcr.io/blockscout/blockscout:latest
     pull_policy: always
     restart: always
@@ -42,8 +45,7 @@ services:
   frontend:
     depends_on:
       - backend
-    image: ghcr.io/blockscout/frontend:latest
-    pull_policy: always
+    image: roko-blockscout-frontend:local
     restart: always
     container_name: 'frontend'
     env_file:
