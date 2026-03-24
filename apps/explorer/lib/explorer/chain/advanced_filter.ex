@@ -439,6 +439,7 @@ defmodule Explorer.Chain.AdvancedFilter do
       filtered_and_paginated_query
       |> repo.all(repo_options)
       |> InternalTransaction.preload_transaction(repo)
+      |> InternalTransaction.preload_addresses([], repo)
     end
   end
 

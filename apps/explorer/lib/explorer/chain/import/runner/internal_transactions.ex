@@ -26,7 +26,7 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
   alias Explorer.Migrator.DeleteZeroValueInternalTransactions
   alias Explorer.Prometheus.Instrumenter
   alias Explorer.Repo, as: ExplorerRepo
-  alias Explorer.Utility.{InternalTransactionHelper, MissingBlockRange}
+  alias Explorer.Utility.{AddressIdToAddressHash, InternalTransactionHelper, MissingBlockRange}
 
   import Ecto.Query
 
@@ -295,16 +295,16 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
           set: [
             call_type: fragment("EXCLUDED.call_type"),
             call_type_enum: fragment("EXCLUDED.call_type_enum"),
-            created_contract_address_hash: fragment("EXCLUDED.created_contract_address_hash"),
+            created_contract_address_id: fragment("EXCLUDED.created_contract_address_id"),
             created_contract_code: fragment("EXCLUDED.created_contract_code"),
             error_id: fragment("EXCLUDED.error_id"),
-            from_address_hash: fragment("EXCLUDED.from_address_hash"),
+            from_address_id: fragment("EXCLUDED.from_address_id"),
             gas: fragment("EXCLUDED.gas"),
             gas_used: fragment("EXCLUDED.gas_used"),
             init: fragment("EXCLUDED.init"),
             input: fragment("EXCLUDED.input"),
             output: fragment("EXCLUDED.output"),
-            to_address_hash: fragment("EXCLUDED.to_address_hash"),
+            to_address_id: fragment("EXCLUDED.to_address_id"),
             type: fragment("EXCLUDED.type"),
             value: fragment("EXCLUDED.value"),
             inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", internal_transaction.inserted_at),
@@ -317,19 +317,19 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
         # `IS DISTINCT FROM` is used because it allows `NULL` to be equal to itself
         where:
           fragment(
-            "(EXCLUDED.call_type, EXCLUDED.call_type_enum, EXCLUDED.created_contract_address_hash, EXCLUDED.created_contract_code, EXCLUDED.error_id, EXCLUDED.from_address_hash, EXCLUDED.gas, EXCLUDED.gas_used, EXCLUDED.init, EXCLUDED.input, EXCLUDED.output, EXCLUDED.to_address_hash, EXCLUDED.type, EXCLUDED.value) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(EXCLUDED.call_type, EXCLUDED.call_type_enum, EXCLUDED.created_contract_address_id, EXCLUDED.created_contract_code, EXCLUDED.error_id, EXCLUDED.from_address_id, EXCLUDED.gas, EXCLUDED.gas_used, EXCLUDED.init, EXCLUDED.input, EXCLUDED.output, EXCLUDED.to_address_id, EXCLUDED.type, EXCLUDED.value) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             internal_transaction.call_type,
             internal_transaction.call_type_enum,
-            internal_transaction.created_contract_address_hash,
+            internal_transaction.created_contract_address_id,
             internal_transaction.created_contract_code,
             internal_transaction.error_id,
-            internal_transaction.from_address_hash,
+            internal_transaction.from_address_id,
             internal_transaction.gas,
             internal_transaction.gas_used,
             internal_transaction.init,
             internal_transaction.input,
             internal_transaction.output,
-            internal_transaction.to_address_hash,
+            internal_transaction.to_address_id,
             internal_transaction.type,
             internal_transaction.value
           )
@@ -342,17 +342,17 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
             block_number: fragment("EXCLUDED.block_number"),
             call_type: fragment("EXCLUDED.call_type"),
             call_type_enum: fragment("EXCLUDED.call_type_enum"),
-            created_contract_address_hash: fragment("EXCLUDED.created_contract_address_hash"),
+            created_contract_address_id: fragment("EXCLUDED.created_contract_address_id"),
             created_contract_code: fragment("EXCLUDED.created_contract_code"),
             error_id: fragment("EXCLUDED.error_id"),
-            from_address_hash: fragment("EXCLUDED.from_address_hash"),
+            from_address_id: fragment("EXCLUDED.from_address_id"),
             gas: fragment("EXCLUDED.gas"),
             gas_used: fragment("EXCLUDED.gas_used"),
             index: fragment("EXCLUDED.index"),
             init: fragment("EXCLUDED.init"),
             input: fragment("EXCLUDED.input"),
             output: fragment("EXCLUDED.output"),
-            to_address_hash: fragment("EXCLUDED.to_address_hash"),
+            to_address_id: fragment("EXCLUDED.to_address_id"),
             transaction_index: fragment("EXCLUDED.transaction_index"),
             type: fragment("EXCLUDED.type"),
             value: fragment("EXCLUDED.value"),
@@ -365,20 +365,20 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
         # `IS DISTINCT FROM` is used because it allows `NULL` to be equal to itself
         where:
           fragment(
-            "(EXCLUDED.index, EXCLUDED.call_type, EXCLUDED.call_type_enum, EXCLUDED.created_contract_address_hash, EXCLUDED.created_contract_code, EXCLUDED.error_id, EXCLUDED.from_address_hash, EXCLUDED.gas, EXCLUDED.gas_used, EXCLUDED.init, EXCLUDED.input, EXCLUDED.output, EXCLUDED.to_address_hash, EXCLUDED.transaction_index, EXCLUDED.type, EXCLUDED.value) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(EXCLUDED.index, EXCLUDED.call_type, EXCLUDED.call_type_enum, EXCLUDED.created_contract_address_id, EXCLUDED.created_contract_code, EXCLUDED.error_id, EXCLUDED.from_address_id, EXCLUDED.gas, EXCLUDED.gas_used, EXCLUDED.init, EXCLUDED.input, EXCLUDED.output, EXCLUDED.to_address_id, EXCLUDED.transaction_index, EXCLUDED.type, EXCLUDED.value) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             internal_transaction.index,
             internal_transaction.call_type,
             internal_transaction.call_type_enum,
-            internal_transaction.created_contract_address_hash,
+            internal_transaction.created_contract_address_id,
             internal_transaction.created_contract_code,
             internal_transaction.error_id,
-            internal_transaction.from_address_hash,
+            internal_transaction.from_address_id,
             internal_transaction.gas,
             internal_transaction.gas_used,
             internal_transaction.init,
             internal_transaction.input,
             internal_transaction.output,
-            internal_transaction.to_address_hash,
+            internal_transaction.to_address_id,
             internal_transaction.transaction_index,
             internal_transaction.type,
             internal_transaction.value
@@ -517,36 +517,44 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
         |> Enum.uniq()
         |> TransactionError.find_or_create_multiple()
 
+      address_hash_to_address_id_map =
+        internal_transactions_params
+        |> Enum.flat_map(&[&1.from_address_hash, &1.to_address_hash, &1.created_contract_address_hash])
+        |> Enum.reject(&is_nil/1)
+        |> Enum.uniq()
+        |> AddressIdToAddressHash.find_or_create_multiple()
+
       valid_internal_transactions =
         internal_transactions_params
         |> Enum.group_by(& &1.block_number)
         |> Map.drop(invalid_block_numbers)
         |> Enum.flat_map(fn item ->
-          compose_entry_wrapper(item, blocks_map, error_to_error_id_map)
+          compose_entry_wrapper(item, blocks_map, error_to_error_id_map, address_hash_to_address_id_map)
         end)
 
       {:ok, valid_internal_transactions}
     end
   end
 
-  defp compose_entry_wrapper(item, blocks_map, error_to_error_id_map) do
+  defp compose_entry_wrapper(item, blocks_map, error_to_error_id_map, address_hash_to_address_id_map) do
     case item do
       {block_number, entries} ->
-        compose_entry(entries, blocks_map, error_to_error_id_map, block_number)
+        compose_entry(entries, block_number, blocks_map, error_to_error_id_map, address_hash_to_address_id_map)
 
       _ ->
         []
     end
   end
 
-  defp compose_entry(entries, blocks_map, error_to_error_id_map, block_number) do
+  defp compose_entry(entries, block_number, blocks_map, error_to_error_id_map, address_hash_to_address_id_map) do
     if Map.has_key?(blocks_map, block_number) do
       if InternalTransactionHelper.primary_key_updated?() do
         Enum.map(entries, fn entry ->
           entry
           |> sanitize_error()
           |> put_error_id(error_to_error_id_map)
-          |> shift_created_contract_address_hash()
+          |> put_address_ids(address_hash_to_address_id_map)
+          |> shift_created_contract_address_id()
         end)
       else
         block_hash = Map.fetch!(blocks_map, block_number)
@@ -561,7 +569,8 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
           |> Map.put(:block_index, index)
           |> sanitize_error()
           |> put_error_id(error_to_error_id_map)
-          |> shift_created_contract_address_hash()
+          |> put_address_ids(address_hash_to_address_id_map)
+          |> shift_created_contract_address_id()
         end)
       end
     else
@@ -571,6 +580,16 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
 
   defp put_error_id(entry, error_to_error_id_map) do
     Map.put(entry, :error_id, Map.get(entry, :error_id) || error_to_error_id_map[Map.get(entry, :error)])
+  end
+
+  defp put_address_ids(entry, address_hash_to_address_id_map) do
+    entry
+    |> Map.drop([:from_address_hash, :to_address_hash, :created_contract_address_hash])
+    |> Map.merge(%{
+      from_address_id: address_hash_to_address_id_map[entry[:from_address_hash]],
+      to_address_id: address_hash_to_address_id_map[entry[:to_address_hash]],
+      created_contract_address_id: address_hash_to_address_id_map[entry[:created_contract_address_hash]]
+    })
   end
 
   defp valid_internal_transactions_without_first_trace(valid_internal_transactions) do
@@ -635,16 +654,16 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
     Map.put(entry, :error, sanitized_error)
   end
 
-  # Shifts the `created_contract_address_hash` value to `to_address_hash` when applicable.
+  # Shifts the `created_contract_address_id` value to `to_address_id` when applicable.
 
   # This function handles the migration of contract creation data by copying the
-  # `created_contract_address_hash` to `to_address_hash` field when:
-  # - `created_contract_address_hash` is present (not nil)
-  # - `to_address_hash` is nil
-  @spec shift_created_contract_address_hash(map()) :: map()
-  defp shift_created_contract_address_hash(entry) do
-    case {Map.get(entry, :created_contract_address_hash), Map.get(entry, :to_address_hash)} do
-      {hash, nil} when not is_nil(hash) -> Map.put(entry, :to_address_hash, hash)
+  # `created_contract_address_id` to `to_address_id` field when:
+  # - `created_contract_address_id` is present (not nil)
+  # - `to_address_id` is nil
+  @spec shift_created_contract_address_id(map()) :: map()
+  defp shift_created_contract_address_id(entry) do
+    case {Map.get(entry, :created_contract_address_id), Map.get(entry, :to_address_id)} do
+      {id, nil} when not is_nil(id) -> Map.put(entry, :to_address_id, id)
       _ -> entry
     end
   end
@@ -679,7 +698,8 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
             gas_used: Map.get(trace, :gas_used),
             transaction_hash:
               Map.fetch!(block_number_index_to_hash_map, {trace[:block_number], trace[:transaction_index]}),
-            created_contract_address_hash: Map.get(trace, :created_contract_address_hash),
+            created_contract_address_hash:
+              AddressIdToAddressHash.id_to_hash(Map.get(trace, :created_contract_address_id)),
             error: Map.get(trace, :error),
             status: if(is_nil(Map.get(trace, :error)), do: :ok, else: :error)
           }
@@ -1012,25 +1032,26 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
     selfdestruct_addresses =
       valid_internal_transactions
       |> Enum.filter(&(&1.type == :selfdestruct))
-      |> Enum.map(&{&1.block_number, &1.transaction_index, &1.from_address_hash})
+      |> Enum.map(&{&1.block_number, &1.transaction_index, &1.from_address_id})
       |> MapSet.new()
 
     # Find all create/create2 internal transactions in the same transactions
     created_addresses =
       valid_internal_transactions
       |> Enum.filter(&(&1.type in [:create, :create2]))
-      |> Enum.map(&{&1.block_number, &1.transaction_index, Map.get(&1, :created_contract_address_hash)})
-      |> Enum.reject(fn {_block_number, _tx_index, address_hash} -> is_nil(address_hash) end)
+      |> Enum.map(&{&1.block_number, &1.transaction_index, Map.get(&1, :created_contract_address_id)})
+      |> Enum.reject(fn {_block_number, _tx_index, address_id} -> is_nil(address_id) end)
       |> MapSet.new()
 
     # Filter to find addresses that were selfdestructed but NOT created in the same transaction
     addresses_to_empty =
       selfdestruct_addresses
-      |> Enum.reject(fn {block_number, tx_index, address_hash} ->
-        MapSet.member?(created_addresses, {block_number, tx_index, address_hash})
+      |> Enum.reject(fn {block_number, tx_index, address_id} ->
+        MapSet.member?(created_addresses, {block_number, tx_index, address_id})
       end)
-      |> Enum.map(fn {_block_number, _tx_index, address_hash} -> address_hash end)
+      |> Enum.map(fn {_block_number, _tx_index, address_id} -> address_id end)
       |> Enum.uniq()
+      |> AddressIdToAddressHash.ids_to_hashes()
 
     if Enum.empty?(addresses_to_empty) do
       {:ok, []}

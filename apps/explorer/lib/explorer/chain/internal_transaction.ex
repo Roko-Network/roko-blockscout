@@ -20,7 +20,7 @@ defmodule Explorer.Chain.InternalTransaction do
   alias Explorer.Chain.Cache.BackgroundMigrations
   alias Explorer.Chain.InternalTransaction.{CallType, Type}
   alias Explorer.Migrator.DeleteZeroValueInternalTransactions
-  alias Explorer.Utility.InternalTransactionHelper
+  alias Explorer.Utility.{AddressIdToAddressHash, InternalTransactionHelper}
 
   import Explorer.Chain.SmartContract.Proxy.Models.Implementation, only: [proxy_implementations_association: 0]
 
@@ -83,25 +83,51 @@ defmodule Explorer.Chain.InternalTransaction do
 
     timestamps()
 
+    belongs_to(:created_contract_address_mapping, AddressIdToAddressHash,
+      foreign_key: :created_contract_address_id,
+      references: :address_id,
+      type: :integer
+    )
+
+    has_one(:created_contract_address, through: [:created_contract_address_mapping, :address])
+
+    # TODO: remove after migration to address ids is done
     belongs_to(
-      :created_contract_address,
+      :created_contract_address_by_hash,
       Address,
       foreign_key: :created_contract_address_hash,
       references: :hash,
       type: Hash.Address
     )
 
+    belongs_to(:from_address_mapping, AddressIdToAddressHash,
+      foreign_key: :from_address_id,
+      references: :address_id,
+      type: :integer
+    )
+
+    has_one(:from_address, through: [:from_address_mapping, :address])
+
+    # TODO: remove after migration to address ids is done
     belongs_to(
-      :from_address,
+      :from_address_by_hash,
       Address,
       foreign_key: :from_address_hash,
       references: :hash,
-      type: Hash.Address,
-      null: false
+      type: Hash.Address
     )
 
+    belongs_to(:to_address_mapping, AddressIdToAddressHash,
+      foreign_key: :to_address_id,
+      references: :address_id,
+      type: :integer
+    )
+
+    has_one(:to_address, through: [:to_address_mapping, :address])
+
+    # TODO: remove after migration to address ids is done
     belongs_to(
-      :to_address,
+      :to_address_by_hash,
       Address,
       foreign_key: :to_address_hash,
       references: :hash,
@@ -120,8 +146,7 @@ defmodule Explorer.Chain.InternalTransaction do
   @doc """
   Validates that the `attrs` are valid.
 
-  `:create` type traces generated when a contract is created are valid.  `created_contract_address_hash`,
-  `from_address_hash` are converted to `t:Explorer.Chain.Hash.t/0`, and `type` is converted to
+  `:create` type traces generated when a contract is created are valid. `type` is converted to
   `t:Explorer.Chain.InternalTransaction.Type.t/0`
 
       iex> changeset = Explorer.Chain.InternalTransaction.changeset(
@@ -129,7 +154,7 @@ defmodule Explorer.Chain.InternalTransaction do
       ...>   %{
       ...>     created_contract_address_hash: "0xffc87239eb0267bc3ca2cd51d12fbf278e02ccb4",
       ...>     created_contract_code: "0x606060405260043610610062576000357c0100000000000000000000000000000000000000000000000000000000900463ffffffff1680630900f01014610067578063445df0ac146100a05780638da5cb5b146100c9578063fdacd5761461011e575b600080fd5b341561007257600080fd5b61009e600480803573ffffffffffffffffffffffffffffffffffffffff16906020019091905050610141565b005b34156100ab57600080fd5b6100b3610224565b6040518082815260200191505060405180910390f35b34156100d457600080fd5b6100dc61022a565b604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390f35b341561012957600080fd5b61013f600480803590602001909190505061024f565b005b60008060009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff161415610220578190508073ffffffffffffffffffffffffffffffffffffffff1663fdacd5766001546040518263ffffffff167c010000000000000000000000000000000000000000000000000000000002815260040180828152602001915050600060405180830381600087803b151561020b57600080fd5b6102c65a03f1151561021c57600080fd5b5050505b5050565b60015481565b6000809054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b6000809054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff1614156102ac57806001819055505b505600a165627a7a72305820a9c628775efbfbc17477a472413c01ee9b33881f550c59d21bee9928835c854b0029",
-      ...>     from_address_hash: "0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca",
+      ...>     from_address_id: 1,
       ...>     gas: 4597044,
       ...>     gas_used: 166651,
       ...>     index: 0,
@@ -144,16 +169,6 @@ defmodule Explorer.Chain.InternalTransaction do
       ...> )
       iex> changeset.valid?
       true
-      iex> changeset.changes.created_contract_address_hash
-      %Explorer.Chain.Hash{
-        byte_count: 20,
-        bytes: <<255, 200, 114, 57, 235, 2, 103, 188, 60, 162, 205, 81, 209, 47, 191, 39, 142, 2, 204, 180>>
-      }
-      iex> changeset.changes.from_address_hash
-      %Explorer.Chain.Hash{
-        byte_count: 20,
-        bytes: <<232, 221, 197, 199, 162, 210, 240, 215, 169, 121, 132, 89, 192, 16, 79, 223, 94, 152, 122, 202>>
-      }
       iex> changeset.changes.type
       :create
 
@@ -164,7 +179,7 @@ defmodule Explorer.Chain.InternalTransaction do
       ...>   %Explorer.Chain.InternalTransaction{},
       ...>   %{
       ...>     error: "Bad instruction",
-      ...>     from_address_hash: "0x78a42d3705fb3c26a4b54737a784bf064f0815fb",
+      ...>     from_address_id: 1,
       ...>     gas: 3946728,
       ...>     index: 0,
       ...>     init: "0x4bb278f3",
@@ -178,11 +193,6 @@ defmodule Explorer.Chain.InternalTransaction do
       iex> )
       iex> changeset.valid?
       true
-      iex> changeset.changes.from_address_hash
-      %Explorer.Chain.Hash{
-        byte_count: 20,
-        bytes: <<120, 164, 45, 55, 5, 251, 60, 38, 164, 181, 71, 55, 167, 132, 191, 6, 79, 8, 21, 251>>
-      }
 
   `:call` type traces are generated when a method in a contract is call.
 
@@ -196,7 +206,7 @@ defmodule Explorer.Chain.InternalTransaction do
       ...>     trace_address: [],
       ...>     call_type: "call",
       ...>     type: "call",
-      ...>     from_address_hash: "0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca",
+      ...>     from_address_id: 1,
       ...>     to_address_hash: "0x8bf38d4764929064f2d4d3a56520a76ab3df415b",
       ...>     gas: 4677320,
       ...>     gas_used: 27770,
@@ -220,7 +230,7 @@ defmodule Explorer.Chain.InternalTransaction do
       ...>     trace_address: [],
       ...>     type: "call",
       ...>     call_type: "call",
-      ...>     from_address_hash: "0xc9266e6fdf5182dc47d27e0dc32bdff9e4cd2e32",
+      ...>     from_address_id: 1,
       ...>     to_address_hash: "0xfdca0da4158740a93693441b35809b5bb463e527",
       ...>     gas: 7578728,
       ...>     input: "0x",
@@ -245,7 +255,7 @@ defmodule Explorer.Chain.InternalTransaction do
       ...>     trace_address: [],
       ...>     type: "call",
       ...>     call_type: "call",
-      ...>     from_address_hash: "0xc9266e6fdf5182dc47d27e0dc32bdff9e4cd2e32",
+      ...>     from_address_id: 1,
       ...>     to_address_hash: "0xfdca0da4158740a93693441b35809b5bb463e527",
       ...>     gas: 7578728,
       ...>     gas_used: 7578727,
@@ -270,7 +280,7 @@ defmodule Explorer.Chain.InternalTransaction do
       ...>     trace_address: [],
       ...>     type: "call",
       ...>     call_type: "call",
-      ...>     from_address_hash: "0xc9266e6fdf5182dc47d27e0dc32bdff9e4cd2e32",
+      ...>     from_address_id: 1,
       ...>     to_address_hash: "0xfdca0da4158740a93693441b35809b5bb463e527",
       ...>     input: "0x",
       ...>     gas: 7578728,
@@ -295,7 +305,7 @@ defmodule Explorer.Chain.InternalTransaction do
       ...>     created_contract_address_hash: "0xffc87239eb0267bc3ca2cd51d12fbf278e02ccb4",
       ...>     created_contract_code: "0x606060405260043610610062576000357c0100000000000000000000000000000000000000000000000000000000900463ffffffff1680630900f01014610067578063445df0ac146100a05780638da5cb5b146100c9578063fdacd5761461011e575b600080fd5b341561007257600080fd5b61009e600480803573ffffffffffffffffffffffffffffffffffffffff16906020019091905050610141565b005b34156100ab57600080fd5b6100b3610224565b6040518082815260200191505060405180910390f35b34156100d457600080fd5b6100dc61022a565b604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390f35b341561012957600080fd5b61013f600480803590602001909190505061024f565b005b60008060009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff161415610220578190508073ffffffffffffffffffffffffffffffffffffffff1663fdacd5766001546040518263ffffffff167c010000000000000000000000000000000000000000000000000000000002815260040180828152602001915050600060405180830381600087803b151561020b57600080fd5b6102c65a03f1151561021c57600080fd5b5050505b5050565b60015481565b6000809054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b6000809054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff1614156102ac57806001819055505b505600a165627a7a72305820a9c628775efbfbc17477a472413c01ee9b33881f550c59d21bee9928835c854b0029",
       ...>     error: "Bad instruction",
-      ...>     from_address_hash: "0x78a42d3705fb3c26a4b54737a784bf064f0815fb",
+      ...>     from_address_id: 1,
       ...>     gas: 3946728,
       ...>     gas_used: 166651,
       ...>     index: 0,
@@ -316,7 +326,7 @@ defmodule Explorer.Chain.InternalTransaction do
       iex> changeset = Explorer.Chain.InternalTransaction.changeset(
       ...>   %Explorer.Chain.InternalTransaction{},
       ...>   %{
-      ...>     from_address_hash: "0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca",
+      ...>     from_address_id: 1,
       ...>     gas: 4597044,
       ...>     index: 0,
       ...>     init: "0x6060604052341561000f57600080fd5b336000806101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff1602179055506102db8061005e6000396000f300606060405260043610610062576000357c0100000000000000000000000000000000000000000000000000000000900463ffffffff1680630900f01014610067578063445df0ac146100a05780638da5cb5b146100c9578063fdacd5761461011e575b600080fd5b341561007257600080fd5b61009e600480803573ffffffffffffffffffffffffffffffffffffffff16906020019091905050610141565b005b34156100ab57600080fd5b6100b3610224565b6040518082815260200191505060405180910390f35b34156100d457600080fd5b6100dc61022a565b604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390f35b341561012957600080fd5b61013f600480803590602001909190505061024f565b005b60008060009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff161415610220578190508073ffffffffffffffffffffffffffffffffffffffff1663fdacd5766001546040518263ffffffff167c010000000000000000000000000000000000000000000000000000000002815260040180828152602001915050600060405180830381600087803b151561020b57600080fd5b6102c65a03f1151561021c57600080fd5b5050505b5050565b60015481565b6000809054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b6000809054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff1614156102ac57806001819055505b505600a165627a7a72305820a9c628775efbfbc17477a472413c01ee9b33881f550c59d21bee9928835c854b0029",
@@ -342,7 +352,7 @@ defmodule Explorer.Chain.InternalTransaction do
       iex> changeset = Explorer.Chain.InternalTransaction.changeset(
       ...>   %Explorer.Chain.InternalTransaction{},
       ...>   %{
-      ...>     from_address_hash: "0xa7542d78b9a0be6147536887e0065f16182d294b",
+      ...>     from_address_id: 1,
       ...>     index: 1,
       ...>     to_address_hash: "0x59e2e9ecf133649b1a7efc731162ff09d29ca5a5",
       ...>     trace_address: [0],
@@ -397,7 +407,7 @@ defmodule Explorer.Chain.InternalTransaction do
   end
 
   @call_optional_fields ~w(error error_id gas_used output value)a
-  @call_required_fields ~w(block_number call_type_enum from_address_hash gas input to_address_hash)a
+  @call_required_fields ~w(block_number call_type_enum from_address_id gas input to_address_hash)a
   @call_allowed_fields @call_optional_fields ++ @call_required_fields
 
   defp type_changeset(changeset, attrs, :call) do
@@ -414,7 +424,7 @@ defmodule Explorer.Chain.InternalTransaction do
   end
 
   @create_optional_fields ~w(error error_id created_contract_code created_contract_address_hash gas_used value)a
-  @create_required_fields ~w(block_number from_address_hash gas init)a
+  @create_required_fields ~w(block_number from_address_id gas init)a
   @create_allowed_fields @create_optional_fields ++ @create_required_fields
 
   defp type_changeset(changeset, attrs, type) when type in [:create, :create2] do
@@ -427,7 +437,7 @@ defmodule Explorer.Chain.InternalTransaction do
   end
 
   @selfdestruct_optional_fields ~w(value)a
-  @selfdestruct_required_fields ~w(block_number from_address_hash to_address_hash type)a
+  @selfdestruct_required_fields ~w(block_number from_address_id to_address_hash type)a
   @selfdestruct_allowed_fields @selfdestruct_optional_fields ++ @selfdestruct_required_fields
 
   defp type_changeset(changeset, attrs, :selfdestruct) do
@@ -436,7 +446,7 @@ defmodule Explorer.Chain.InternalTransaction do
     |> validate_required(@selfdestruct_required_fields)
   end
 
-  @stop_optional_fields ~w(from_address_hash gas gas_used error error_id value)a
+  @stop_optional_fields ~w(from_address_id gas gas_used error error_id value)a
   @stop_required_fields ~w(block_number type)a
   @stop_allowed_fields @stop_optional_fields ++ @stop_required_fields
 
@@ -521,35 +531,58 @@ defmodule Explorer.Chain.InternalTransaction do
   """
   def where_address_fields_match(query, address_hash, :to) do
     if BackgroundMigrations.get_empty_internal_transactions_data_finished() do
-      where(query, [t], t.to_address_hash == ^address_hash)
+      query
+      |> join_address_query(:to_address)
+      |> where([it], it.to_address_hash == ^address_hash or as(:to_address).hash == ^address_hash)
     else
-      where(
-        query,
-        [t],
-        t.to_address_hash == ^address_hash or
-          (is_nil(t.to_address_hash) and t.created_contract_address_hash == ^address_hash)
+      query
+      |> join_address_query(:to_address)
+      |> join_address_query(:created_contract_address)
+      |> where(
+        [it],
+        it.to_address_hash == ^address_hash or as(:to_address).hash == ^address_hash or
+          ((is_nil(it.to_address_hash) and is_nil(as(:to_address).hash) and
+              it.created_contract_address_hash == ^address_hash) or as(:created_contract_address).hash == ^address_hash)
       )
     end
   end
 
   def where_address_fields_match(query, address_hash, :from) do
-    where(query, [t], t.from_address_hash == ^address_hash)
+    query
+    |> join_address_query(:from_address)
+    |> where([it], it.from_address_hash == ^address_hash or as(:from_address).hash == ^address_hash)
   end
 
   def where_address_fields_match(query, address_hash, :to_address_hash) do
     if BackgroundMigrations.get_empty_internal_transactions_data_finished() do
-      where(query, [it], it.to_address_hash == ^address_hash and is_nil(it.created_contract_address_hash))
+      query
+      |> join_address_query(:to_address)
+      |> join_address_query(:created_contract_address)
+      |> where(
+        [it],
+        (it.to_address_hash == ^address_hash or as(:to_address).hash == ^address_hash) and
+          is_nil(it.created_contract_address_hash) and is_nil(as(:created_contract_address).hash)
+      )
     else
-      where(query, [it], it.to_address_hash == ^address_hash)
+      query
+      |> join_address_query(:to_address)
+      |> where([it], it.to_address_hash == ^address_hash or as(:to_address).hash == ^address_hash)
     end
   end
 
   def where_address_fields_match(query, address_hash, :from_address_hash) do
-    where(query, [it], it.from_address_hash == ^address_hash)
+    query
+    |> join_address_query(:from_address)
+    |> where([it], it.from_address_hash == ^address_hash or as(:from_address).hash == ^address_hash)
   end
 
   def where_address_fields_match(query, address_hash, :created_contract_address_hash) do
-    where(query, [it], it.created_contract_address_hash == ^address_hash)
+    query
+    |> join_address_query(:created_contract_address)
+    |> where(
+      [it],
+      it.created_contract_address_hash == ^address_hash or as(:created_contract_address).hash == ^address_hash
+    )
   end
 
   def where_address_fields_match(query, address_hash, _) do
@@ -557,11 +590,15 @@ defmodule Explorer.Chain.InternalTransaction do
   end
 
   defp base_address_where(query, address_hash) do
-    where(
-      query,
+    query
+    |> join_address_query(:to_address)
+    |> join_address_query(:from_address)
+    |> join_address_query(:created_contract_address)
+    |> where(
       [it],
-      it.to_address_hash == ^address_hash or it.from_address_hash == ^address_hash or
-        it.created_contract_address_hash == ^address_hash
+      it.to_address_hash == ^address_hash or as(:to_address).hash == ^address_hash or
+        it.from_address_hash == ^address_hash or as(:from_address).hash == ^address_hash or
+        it.created_contract_address_hash == ^address_hash or as(:created_contract_address).hash == ^address_hash
     )
   end
 
@@ -632,6 +669,7 @@ defmodule Explorer.Chain.InternalTransaction do
     |> Chain.select_repo(options).all()
     |> preload_error(options)
     |> preload_transaction()
+    |> preload_addresses(options)
   end
 
   @spec transaction_to_internal_transactions(Hash.Full.t(), [
@@ -656,6 +694,7 @@ defmodule Explorer.Chain.InternalTransaction do
     |> Chain.select_repo(options).all()
     |> preload_error(options)
     |> preload_transaction()
+    |> preload_addresses(options)
   end
 
   @spec block_to_internal_transactions(non_neg_integer(), [
@@ -683,6 +722,7 @@ defmodule Explorer.Chain.InternalTransaction do
     |> Chain.select_repo(options).all()
     |> preload_error(options)
     |> preload_transaction()
+    |> preload_addresses(options)
   end
 
   @doc """
@@ -814,6 +854,7 @@ defmodule Explorer.Chain.InternalTransaction do
       |> deduplicate_and_trim_internal_transactions(paging_options)
       |> preload_error(options)
       |> preload_transaction()
+      |> preload_addresses(options)
     else
       __MODULE__
       |> where_nonpending_operation()
@@ -826,6 +867,7 @@ defmodule Explorer.Chain.InternalTransaction do
       |> Chain.select_repo(options).all()
       |> preload_error(options)
       |> preload_transaction()
+      |> preload_addresses(options)
     end
   end
 
@@ -835,6 +877,12 @@ defmodule Explorer.Chain.InternalTransaction do
         on: it.block_number == t.block_number and it.transaction_index == t.index and t.block_consensus == true,
         as: ^binding
       )
+    end)
+  end
+
+  def join_address_query(query, address_field) do
+    with_named_binding(query, address_field, fn query, binding ->
+      join(query, :inner, [it], a in assoc(it, ^address_field), as: ^binding)
     end)
   end
 
@@ -1008,12 +1056,12 @@ defmodule Explorer.Chain.InternalTransaction do
         []
 
       _ ->
-        preloads =
-          [
-            :block,
-            [from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]],
-            [to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]]
+        preload_options = [
+          preload: [
+            from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()],
+            to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]
           ]
+        ]
 
         __MODULE__
         |> where_nonpending_operation()
@@ -1026,10 +1074,11 @@ defmodule Explorer.Chain.InternalTransaction do
           desc: internal_transaction.index
         )
         |> limit(^paging_options.page_size)
-        |> preload(^preloads)
+        |> preload(:block)
         |> Chain.select_repo(options).all()
         |> preload_error(options)
         |> preload_transaction()
+        |> preload_addresses(preload_options)
     end
   end
 
@@ -1308,6 +1357,101 @@ defmodule Explorer.Chain.InternalTransaction do
   def preload_transaction(internal_transaction, repo, transactions) do
     [internal_transaction]
     |> preload_transaction(repo, transactions)
+    |> List.first()
+  end
+
+  @default_address_preloads [from_address: [], to_address: [], created_contract_address: []]
+  def preload_addresses(internal_transactions, options \\ [], repo \\ nil)
+
+  def preload_addresses(internal_transactions, options, repo) when is_list(internal_transactions) do
+    preloads = Keyword.merge(@default_address_preloads, Keyword.get(options, :address_preloads, []))
+    repo = repo || Chain.select_repo(options)
+
+    indexed_transactions = Enum.with_index(internal_transactions)
+
+    {migrated_indexed, not_migrated_indexed} =
+      Enum.split_with(
+        indexed_transactions,
+        fn {it, _idx} ->
+          is_nil(it.from_address_hash) and is_nil(it.to_address_hash) and is_nil(it.created_contract_address_hash)
+        end
+      )
+
+    migrated_internal_transactions = Enum.map(migrated_indexed, &elem(&1, 0))
+    not_migrated_internal_transactions = Enum.map(not_migrated_indexed, &elem(&1, 0))
+
+    not_migrated_preloaded =
+      case not_migrated_internal_transactions do
+        [] ->
+          []
+
+        not_migrated ->
+          unified_preloads =
+            preloads
+            |> List.wrap()
+            |> Enum.map(fn
+              preload when is_atom(preload) -> {String.to_existing_atom("#{preload}_by_hash"), []}
+              {preload, fields} -> {String.to_existing_atom("#{preload}_by_hash"), fields}
+            end)
+
+          not_migrated
+          |> repo.preload(unified_preloads)
+          |> Enum.map(fn internal_transaction ->
+            Enum.reduce(
+              [
+                {:from_address_by_hash, :from_address_hash, :from_address},
+                {:to_address_by_hash, :to_address_hash, :to_address},
+                {:created_contract_address_by_hash, :created_contract_address_hash, :created_contract_address}
+              ],
+              internal_transaction,
+              fn {source_field, hash_field, address_field}, acc ->
+                corresponding_address = Map.get(acc, source_field)
+
+                Map.merge(acc, %{
+                  hash_field => corresponding_address && corresponding_address.hash,
+                  address_field => corresponding_address
+                })
+              end
+            )
+          end)
+      end
+
+    migrated_preloaded =
+      case migrated_internal_transactions do
+        [] ->
+          []
+
+        migrated ->
+          migrated
+          |> repo.preload(preloads)
+          |> Enum.map(fn internal_transaction ->
+            Enum.reduce(
+              [
+                {:from_address_hash, :from_address},
+                {:to_address_hash, :to_address},
+                {:created_contract_address_hash, :created_contract_address}
+              ],
+              internal_transaction,
+              # credo:disable-for-next-line Credo.Check.Refactor.Nesting
+              fn {hash_field, address_field}, acc ->
+                corresponding_address = Map.get(acc, address_field)
+                Map.put(acc, hash_field, corresponding_address && corresponding_address.hash)
+              end
+            )
+          end)
+      end
+
+    migrated_with_idx = Enum.zip(migrated_preloaded, Enum.map(migrated_indexed, &elem(&1, 1)))
+    not_migrated_with_idx = Enum.zip(not_migrated_preloaded, Enum.map(not_migrated_indexed, &elem(&1, 1)))
+
+    (migrated_with_idx ++ not_migrated_with_idx)
+    |> Enum.sort_by(&elem(&1, 1))
+    |> Enum.map(&elem(&1, 0))
+  end
+
+  def preload_addresses(internal_transaction, options, repo) do
+    [internal_transaction]
+    |> preload_addresses(options, repo)
     |> List.first()
   end
 end

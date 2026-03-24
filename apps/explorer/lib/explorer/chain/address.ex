@@ -1096,7 +1096,11 @@ defmodule Explorer.Chain.Address do
   def creation_internal_transaction_query(address_hash) do
     InternalTransaction
     |> InternalTransaction.join_transaction_query()
-    |> where([it], it.created_contract_address_hash == ^address_hash)
+    |> InternalTransaction.join_address_query(:created_contract_address)
+    |> where(
+      [it],
+      it.created_contract_address_hash == ^address_hash or as(:created_contract_address).hash == ^address_hash
+    )
     |> where(as(:transaction).status == ^:ok)
     |> order_by([it], desc: it.block_number, desc: it.transaction_index, desc: it.index)
     |> limit(1)

@@ -128,6 +128,7 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransaction do
         |> Repo.preload(:block)
         |> InternalTransaction.preload_error()
         |> InternalTransaction.preload_transaction()
+        |> InternalTransaction.preload_addresses(options)
 
       :ignore ->
         [transaction.block_number]
@@ -143,6 +144,7 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransaction do
         |> Repo.preload(:block)
         |> InternalTransaction.preload_error()
         |> InternalTransaction.preload_transaction()
+        |> InternalTransaction.preload_addresses(options)
 
       error ->
         Logger.error(
@@ -197,6 +199,7 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransaction do
     |> join_associations(necessity_by_association)
     |> InternalTransaction.preload_error()
     |> InternalTransaction.preload_transaction()
+    |> InternalTransaction.preload_addresses(options)
   end
 
   @doc """
@@ -278,6 +281,7 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransaction do
     |> Repo.preload(:block)
     |> InternalTransaction.preload_error()
     |> InternalTransaction.preload_transaction()
+    |> InternalTransaction.preload_addresses(options)
   end
 
   defp do_fetch_for_address(address_id, to_block, from_block, limit, sum_mode, sort_direction, acc \\ [])

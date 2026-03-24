@@ -604,13 +604,11 @@ defmodule BlockScoutWeb.API.V2.AddressController do
         {:ok, _address} ->
           full_options =
             [
-              necessity_by_association: %{
-                [created_contract_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] =>
-                  :optional,
-                [from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] =>
-                  :optional,
-                [to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional
-              }
+              address_preloads: [
+                created_contract_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()],
+                from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()],
+                to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]
+              ]
             ]
             |> Keyword.merge(paging_options(params))
             |> Keyword.merge(current_filter(params))
