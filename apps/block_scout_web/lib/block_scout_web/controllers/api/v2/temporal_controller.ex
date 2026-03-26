@@ -104,9 +104,25 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
   peer_count, and watermark.
   """
   @spec quality_chart(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def quality_chart(conn, _params) do
-    samples = BlockScoutWeb.TemporalQualitySampler.get_history()
-    json(conn, %{chart_data: samples})
+  def quality_chart(conn, params) do
+    hours = case Integer.parse(params["hours"] || "720") do
+      {h, _} when h > 0 and h <= 8760 -> h
+      _ -> 720
+    end
+
+    # DB samples (hourly, long-term) + in-memory samples (per-request, recent)
+    db_samples = BlockScoutWeb.TemporalQualitySampler.get_db_history(hours)
+    recent_samples = BlockScoutWeb.TemporalQualitySampler.get_history()
+
+    # Merge: DB first, then recent (avoiding duplicates by timestamp)
+    db_max_ts = case List.last(db_samples) do
+      %{timestamp: ts} -> ts
+      _ -> 0
+    end
+
+    merged = db_samples ++ Enum.filter(recent_samples, fn s -> s.timestamp > db_max_ts end)
+
+    json(conn, %{chart_data: merged, db_samples: length(db_samples), recent_samples: length(recent_samples)})
   end
 
   @doc """
