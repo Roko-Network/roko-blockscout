@@ -509,6 +509,7 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
       get("/quality-chart", V2.TemporalController, :quality_chart)
       get("/transactions/:transaction_hash_param/timestamp", V2.TemporalController, :transaction_timestamp)
       get("/blocks/:block_number_param/metadata", V2.TemporalController, :block_metadata)
+      get("/blocks/:block_number_param/timestamps", V2.TemporalController, :block_transaction_timestamps)
     end
   end
 

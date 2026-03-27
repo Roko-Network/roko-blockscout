@@ -71,20 +71,31 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
   @spec transaction_timestamp(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def transaction_timestamp(conn, %{"transaction_hash_param" => tx_hash}) do
     # Try direct hash lookup first (works for Substrate hashes)
-    case rpc_call("temporal_getTransactionTimestamp", [tx_hash]) do
-      {:ok, result} when not is_nil(result) ->
-        json(conn, %{timestamp_ns: result, hash: tx_hash})
+    timestamp_ns =
+      case rpc_call("temporal_getTransactionTimestamp", [tx_hash]) do
+        {:ok, result} when not is_nil(result) -> result
+        _ ->
+          case resolve_eth_tx_timestamp(tx_hash) do
+            {:ok, ts} -> ts
+            _ -> nil
+          end
+      end
 
-      _ ->
-        # For Ethereum tx hashes: look up block, then cross-reference
-        case resolve_eth_tx_timestamp(tx_hash) do
-          {:ok, timestamp_ns} ->
-            json(conn, %{timestamp_ns: timestamp_ns, hash: tx_hash})
+    # Get wait time info if available
+    wait_info =
+      case rpc_call("temporal_getTransactionWaitTime", [tx_hash]) do
+        {:ok, result} when is_map(result) -> result
+        _ -> %{}
+      end
 
-          _ ->
-            json(conn, %{timestamp_ns: nil, hash: tx_hash})
-        end
-    end
+    json(conn, %{
+      hash: tx_hash,
+      timestamp_ns: timestamp_ns,
+      wait_ns: wait_info["waitNs"],
+      arrival_ns: wait_info["arrivalNs"],
+      priority: wait_info["priority"],
+      queue_position: wait_info["queuePosition"]
+    })
   end
 
   # Resolve an Ethereum tx hash to its temporal timestamp by:
@@ -182,7 +193,31 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
     end
   end
 
-  # Makes a JSON-RPC POST request to the configured Roko node endpoint.
+  @doc """
+  Returns per-transaction nanosecond timestamps for all extrinsics in a block.
+
+  Proxies `temporal_getBlockTransactionTimestamps` to the Roko node.
+  Each entry contains:
+    - substrateHash: the Substrate extrinsic hash
+    - ethHash: the Ethereum transaction hash (null for inherents)
+    - timestampNs: the canonical nanosecond timestamp (null if not stamped)
+    - index: the extrinsic index within the block
+  """
+  @spec block_transaction_timestamps(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def block_transaction_timestamps(conn, %{"block_number_param" => block_number_str}) do
+    case Integer.parse(block_number_str) do
+      {block_number, _} ->
+        case rpc_call("temporal_getBlockTransactionTimestamps", [block_number]) do
+          {:ok, result} -> json(conn, result)
+          {:error, reason} -> conn |> put_status(502) |> json(%{error: reason})
+        end
+
+      :error ->
+        conn |> put_status(400) |> json(%{error: "invalid block number"})
+    end
+  end
+
+    # Makes a JSON-RPC POST request to the configured Roko node endpoint.
   # Returns {:ok, result} on success or {:error, reason_string} on failure.
   @spec rpc_call(String.t(), list()) :: {:ok, term()} | {:error, String.t()}
   defp rpc_call(method, params) do
