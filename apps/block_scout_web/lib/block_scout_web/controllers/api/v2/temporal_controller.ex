@@ -70,9 +70,53 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
   """
   @spec transaction_timestamp(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def transaction_timestamp(conn, %{"transaction_hash_param" => tx_hash}) do
+    # Try direct hash lookup first (works for Substrate hashes)
     case rpc_call("temporal_getTransactionTimestamp", [tx_hash]) do
-      {:ok, result} -> json(conn, result)
-      {:error, reason} -> conn |> put_status(502) |> json(%{error: reason})
+      {:ok, result} when not is_nil(result) ->
+        json(conn, %{timestamp_ns: result, hash: tx_hash})
+
+      _ ->
+        # For Ethereum tx hashes: look up block, then cross-reference
+        case resolve_eth_tx_timestamp(tx_hash) do
+          {:ok, timestamp_ns} ->
+            json(conn, %{timestamp_ns: timestamp_ns, hash: tx_hash})
+
+          _ ->
+            json(conn, %{timestamp_ns: nil, hash: tx_hash})
+        end
+    end
+  end
+
+  # Resolve an Ethereum tx hash to its temporal timestamp by:
+  # 1. Getting the tx's block number via eth_getTransactionByHash
+  # 2. Getting all temporal timestamps for that block
+  # 3. Matching by transaction index
+  defp resolve_eth_tx_timestamp(eth_tx_hash) do
+    with {:ok, tx_info} when not is_nil(tx_info) <-
+           rpc_call("eth_getTransactionByHash", [eth_tx_hash]),
+         block_hex when is_binary(block_hex) <- tx_info["blockNumber"],
+         {block_number, _} <- Integer.parse(String.replace_prefix(block_hex, "0x", ""), 16),
+         index_hex when is_binary(index_hex) <- tx_info["transactionIndex"],
+         {tx_index, _} <- Integer.parse(String.replace_prefix(index_hex, "0x", ""), 16),
+         {:ok, timestamps} when is_list(timestamps) <-
+           rpc_call("temporal_getBlockTransactionTimestamps", [block_number]) do
+      # Find the timestamp entry matching this tx index
+      # The block extrinsics include inherents at indices 0-2, so the EVM tx
+      # at eth index N is at substrate index N+3 (timestamp, parachainSystem, temporal inherents)
+      matching =
+        Enum.find(timestamps, fn entry ->
+          (entry["index"] || -1) - 3 == tx_index
+        end) || Enum.find(timestamps, fn entry ->
+          # Fallback: try matching by the substrate hash in canonical_timestamps
+          entry["timestampNs"] != nil && (entry["index"] || -1) >= 3
+        end)
+
+      case matching do
+        %{"timestampNs" => ts} when not is_nil(ts) -> {:ok, ts}
+        _ -> {:error, :not_found}
+      end
+    else
+      _ -> {:error, :not_found}
     end
   end
 
