@@ -165,19 +165,8 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
       _ -> 720
     end
 
-    # DB samples (hourly, long-term) + in-memory samples (per-request, recent)
     db_samples = BlockScoutWeb.TemporalQualitySampler.get_db_history(hours)
-    recent_samples = BlockScoutWeb.TemporalQualitySampler.get_history()
-
-    # Merge: DB first, then recent (avoiding duplicates by timestamp)
-    db_max_ts = case List.last(db_samples) do
-      %{timestamp: ts} -> ts
-      _ -> 0
-    end
-
-    merged = db_samples ++ Enum.filter(recent_samples, fn s -> s.timestamp > db_max_ts end)
-
-    json(conn, %{chart_data: merged, db_samples: length(db_samples), recent_samples: length(recent_samples)})
+    json(conn, %{chart_data: db_samples})
   end
 
   @doc """

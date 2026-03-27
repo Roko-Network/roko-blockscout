@@ -1,55 +1,20 @@
 defmodule BlockScoutWeb.TemporalQualitySampler do
   @moduledoc """
-  Temporal quality history with both in-memory (recent) and DB (long-term) storage.
+  Temporal quality DB persistence.
 
-  In-memory: records every consensus-time API call (up to 14,400 samples / ~24h).
-  DB: persists one sample per hour via `persist_hourly/5` for long-term charting.
+  Persists one sample every 5 minutes to PostgreSQL for long-term charting.
+  Triggered lazily on each consensus-time API call.
   """
 
   alias Explorer.Chain.TemporalQualitySample
   alias Explorer.Repo
 
-  @max_memory_samples 14_400
-  @hourly_interval_ms 3_600_000
-
-  # --- In-memory (recent) ---
+  # Persist every 5 minutes
+  @persist_interval_ms 300_000
 
   def record_sample(quality, converged, peer_count, watermark) do
-    now_ms = System.system_time(:millisecond)
-
-    sample = %{
-      timestamp: now_ms,
-      quality: quality,
-      converged: converged,
-      peer_count: peer_count,
-      watermark: watermark
-    }
-
-    samples = get_memory_samples()
-    updated = samples ++ [sample]
-
-    pruned =
-      if length(updated) > @max_memory_samples do
-        Enum.drop(updated, length(updated) - @max_memory_samples)
-      else
-        updated
-      end
-
-    Application.put_env(:block_scout_web, :temporal_quality_samples, pruned)
-
-    # Persist hourly to DB
-    maybe_persist_hourly(quality, converged, peer_count, watermark)
+    maybe_persist(quality, converged, peer_count, watermark)
   end
-
-  def get_history do
-    get_memory_samples()
-  end
-
-  defp get_memory_samples do
-    Application.get_env(:block_scout_web, :temporal_quality_samples, [])
-  end
-
-  # --- DB persistence (hourly) ---
 
   def get_db_history(hours_back \\ 720) do
     try do
@@ -70,11 +35,11 @@ defmodule BlockScoutWeb.TemporalQualitySampler do
     end
   end
 
-  defp maybe_persist_hourly(quality, converged, peer_count, watermark) do
+  defp maybe_persist(quality, converged, peer_count, watermark) do
     last_persist = Application.get_env(:block_scout_web, :temporal_last_persist_ms, 0)
     now_ms = System.system_time(:millisecond)
 
-    if now_ms - last_persist >= @hourly_interval_ms do
+    if now_ms - last_persist >= @persist_interval_ms do
       Application.put_env(:block_scout_web, :temporal_last_persist_ms, now_ms)
 
       block_height =
