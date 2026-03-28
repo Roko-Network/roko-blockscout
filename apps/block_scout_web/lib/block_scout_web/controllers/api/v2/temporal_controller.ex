@@ -98,6 +98,56 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
     })
   end
 
+  @doc "Returns full mesh state including pairwise validator offsets."
+  def mesh_state(conn, _params) do
+    case rpc_call("temporal_getMeshState", []) do
+      {:ok, result} -> json(conn, result)
+      {:error, reason} -> conn |> put_status(502) |> json(%{error: reason})
+    end
+  end
+
+  @doc "Returns the latest time health checkpoint with validator reports."
+  def checkpoint(conn, _params) do
+    case rpc_call("temporal_getCheckpoint", []) do
+      {:ok, result} -> json(conn, result)
+      {:error, reason} -> conn |> put_status(502) |> json(%{error: reason})
+    end
+  end
+
+  @doc "Returns cumulative temporal processing metrics."
+  def temporal_metrics(conn, _params) do
+    case rpc_call("temporal_getTemporalMetrics", []) do
+      {:ok, result} -> json(conn, result)
+      {:error, reason} -> conn |> put_status(502) |> json(%{error: reason})
+    end
+  end
+
+  @doc "Returns time quality data for a specific validator."
+  def validator_quality(conn, %{"authority_index" => idx_str}) do
+    case Integer.parse(idx_str) do
+      {idx, _} ->
+        case rpc_call("temporal_getValidatorTimeQuality", [idx]) do
+          {:ok, result} -> json(conn, result)
+          {:error, reason} -> conn |> put_status(502) |> json(%{error: reason})
+        end
+      :error ->
+        conn |> put_status(400) |> json(%{error: "invalid authority index"})
+    end
+  end
+
+  @doc "Returns violation tracker data for a specific validator."
+  def validator_violations(conn, %{"authority_index" => idx_str}) do
+    case Integer.parse(idx_str) do
+      {idx, _} ->
+        case rpc_call("temporal_getViolations", [idx]) do
+          {:ok, result} -> json(conn, result)
+          {:error, reason} -> conn |> put_status(502) |> json(%{error: reason})
+        end
+      :error ->
+        conn |> put_status(400) |> json(%{error: "invalid authority index"})
+    end
+  end
+
   # Resolve an Ethereum tx hash to its temporal timestamp by:
   # 1. Getting the tx's block number via eth_getTransactionByHash
   # 2. Getting all temporal timestamps for that block
