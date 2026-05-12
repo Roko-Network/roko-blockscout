@@ -39,4 +39,15 @@ defmodule Explorer.Chain.TemporalQualitySample do
       order_by: [asc: s.sampled_at]
     )
   end
+
+  @doc """
+  Returns a query for the most recent persisted sample, or nil if none exists.
+  Used by the `/api/v2/temporal/quality` snapshot endpoint.
+  """
+  def latest_query do
+    from(s in __MODULE__,
+      order_by: [desc: s.sampled_at],
+      limit: 1
+    )
+  end
 end

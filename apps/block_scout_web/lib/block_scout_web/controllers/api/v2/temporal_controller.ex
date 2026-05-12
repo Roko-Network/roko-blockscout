@@ -16,6 +16,9 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
 
   require Logger
 
+  alias Explorer.Repo
+  alias Explorer.Chain.TemporalQualitySample
+
   @doc """
   Returns the current temporal watermark (block number + timestamp).
 
@@ -270,6 +273,37 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
 
     db_samples = BlockScoutWeb.TemporalQualitySampler.get_db_history(hours)
     json(conn, %{chart_data: db_samples})
+  end
+
+  @doc """
+  Returns a current-snapshot quality reading: the most recently persisted
+  TemporalQualitySample merged with a live temporal_getConsensusTime fetch.
+
+  Returns 404 when no samples have been persisted yet (e.g. fresh chain).
+  Returns 502 when the live RPC fails but a sample exists (snapshot-only).
+  """
+  @spec current_quality(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def current_quality(conn, _params) do
+    case Repo.one(TemporalQualitySample.latest_query()) do
+      nil ->
+        conn |> put_status(404) |> json(%{error: "no_samples"})
+
+      %TemporalQualitySample{} = sample ->
+        live = case rpc_call("temporal_getConsensusTime", []) do
+          {:ok, result} when is_map(result) -> result
+          _ -> %{}
+        end
+
+        json(conn, %{
+          sampled_at: sample.sampled_at,
+          time_quality: sample.time_quality,
+          is_converged: sample.is_converged,
+          peer_count: sample.peer_count,
+          watermark: sample.watermark,
+          block_height: sample.block_height,
+          live: live
+        })
+    end
   end
 
   @doc """
