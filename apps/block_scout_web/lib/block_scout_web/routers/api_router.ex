@@ -505,6 +505,20 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
       get("/blocks/:block_number_param/metadata", V2.TemporalController, :block_metadata)
       get("/blocks/:block_number_param/timestamps", V2.TemporalController, :block_transaction_timestamps)
     end
+
+    # Substrate-native endpoints backed by the roko-indexer-sidecar
+    # (Rust crate at sidecar/, writes to the `roko.*` Postgres schema).
+    # Sibling to /temporal — this is the historical/aggregable view; /temporal
+    # is the live-state proxy.
+    scope "/substrate" do
+      get("/validators", V2.SubstrateController, :validators)
+      get("/validators/:stash", V2.SubstrateController, :validator)
+      get("/validators/:stash/violations", V2.SubstrateController, :validator_violations)
+      get("/validators/:stash/pwroko-history", V2.SubstrateController, :validator_pwroko_history)
+      get("/eras", V2.SubstrateController, :eras)
+      get("/slashing", V2.SubstrateController, :slashing)
+      get("/pwroko/recent", V2.SubstrateController, :pwroko_recent)
+    end
   end
 
   scope "/legacy" do
