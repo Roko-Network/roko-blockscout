@@ -71,6 +71,32 @@ services:
       - "80:80"
       - "443:443"
 
+  # Substrate-native indexer sidecar. Subscribes to finalized headers via
+  # subxt, decodes pallet events, writes into the `roko.*` schema of the
+  # same Postgres instance. Read by SubstrateController in the backend.
+  roko-indexer:
+    depends_on:
+      db:
+        condition: service_healthy
+    image: ${ROKO_INDEXER_IMAGE:-ghcr.io/roko-network/roko-indexer:testnet-latest-amd64}
+    container_name: roko-indexer
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://roko_indexer:${ROKO_INDEXER_DB_PASSWORD:?ROKO_INDEXER_DB_PASSWORD must be set in deploy/.env}@db:5432/blockscout
+      ROKO_RPC_WS_URL: ${ROKO_RPC_WS_URL:-wss://roko-testnetv2.ntfork.com}
+      ROKO_RPC_FALLBACK_URL: ${ROKO_RPC_FALLBACK_URL:-}
+      INDEXER_START_BLOCK: ${INDEXER_START_BLOCK:-0}
+      METRICS_BIND: 0.0.0.0:9100
+      RUST_LOG: ${ROKO_INDEXER_RUST_LOG:-info,roko_indexer_sidecar=info}
+      LOG_FORMAT: ${ROKO_INDEXER_LOG_FORMAT:-text}
+    ports:
+      - "127.0.0.1:9100:9100"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9100/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
 volumes:
   redis-data:
   postgres-data:
