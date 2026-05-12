@@ -1,0 +1,15 @@
+# Local-only deployment state. Templates live alongside as .env.example files.
+.env
+envs/backend.env
+envs/frontend.env
+
+# Re-include .env.example templates — the repo root .gitignore (line 68:
+# `*.env.example`) excludes them globally, which is the wrong default for
+# this directory because operators need the templates checked in.
+!.env.example
+!envs/*.env.example
+
+# Runtime artifacts produced on the host
+logs/
+dets/
+certbot-webroot/
