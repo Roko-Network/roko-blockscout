@@ -182,6 +182,59 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
   end
 
   @doc """
+  Returns canonical nanosecond timestamps for a batch of transaction hashes.
+
+  Accepts a JSON body with `{"hashes": ["0x...", ...]}` (max 100 per call).
+  Returns a map of hash → timestamp data, fetched in parallel via temporal_getTransactionTimestamp,
+  falling back to per-block resolution when the direct lookup fails.
+
+  Each result is either `%{timestamp_ns: <int|nil>}` on success or `%{error: <reason>}` if the
+  RPC fetch timed out — callers can distinguish "no timestamp" from "RPC failed".
+  """
+  @spec batch_transaction_timestamps(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def batch_transaction_timestamps(conn, params) do
+    hashes =
+      case params do
+        %{"hashes" => h} when is_list(h) -> h
+        %{"hashes" => h} when is_binary(h) -> String.split(h, ",", trim: true)
+        _ -> []
+      end
+
+    hashes = Enum.take(hashes, 100)
+
+    results =
+      hashes
+      |> Task.async_stream(
+        fn tx_hash ->
+          timestamp_ns =
+            case rpc_call("temporal_getTransactionTimestamp", [tx_hash]) do
+              {:ok, result} when not is_nil(result) ->
+                result
+
+              _ ->
+                case resolve_eth_tx_timestamp(tx_hash) do
+                  {:ok, ts} -> ts
+                  _ -> nil
+                end
+            end
+
+          {tx_hash, %{timestamp_ns: timestamp_ns}}
+        end,
+        max_concurrency: 10,
+        timeout: 15_000,
+        on_timeout: :kill_task
+      )
+      |> Enum.zip(hashes)
+      |> Enum.reduce(%{}, fn
+        {{:ok, {hash, data}}, _hash_in}, acc -> Map.put(acc, hash, data)
+        {{:exit, :timeout}, hash_in}, acc -> Map.put(acc, hash_in, %{error: "timeout"})
+        {_, hash_in}, acc -> Map.put(acc, hash_in, %{error: "rpc_failure"})
+      end)
+
+    json(conn, %{timestamps: results})
+  end
+
+  @doc """
   Returns the temporal metadata for a specific block number.
 
   Proxies `temporal_getBlockMetadata` to the Roko node.
