@@ -510,6 +510,7 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
       get("/mesh-state", V2.TemporalController, :mesh_state)
       get("/checkpoint", V2.TemporalController, :checkpoint)
       get("/metrics", V2.TemporalController, :temporal_metrics)
+      get("/quality", V2.TemporalController, :current_quality)
       get("/validators/:authority_index/quality", V2.TemporalController, :validator_quality)
       get("/validators/:authority_index/violations", V2.TemporalController, :validator_violations)
       get("/transactions/:transaction_hash_param/timestamp", V2.TemporalController, :transaction_timestamp)
