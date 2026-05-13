@@ -514,10 +514,33 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
       get("/validators", V2.SubstrateController, :validators)
       get("/validators/:stash", V2.SubstrateController, :validator)
       get("/validators/:stash/violations", V2.SubstrateController, :validator_violations)
-      get("/validators/:stash/pwroko-history", V2.SubstrateController, :validator_pwroko_history)
+      # Sprint 4 / S4-T8: live-state passthrough of the validator's
+      # clock-hardware self-attestation (timeSync.clockAttestations storage).
+      get(
+        "/validators/:stash/clock-attestation",
+        V2.SubstrateController,
+        :validator_clock_attestation
+      )
+      # Kept as alias of /accounts/:address_param/pwroko-history (Sprint 4 / S4-T7).
+      get(
+        "/validators/:stash/pwroko-history",
+        V2.SubstrateController,
+        :validator_pwroko_history
+      )
       get("/eras", V2.SubstrateController, :eras)
+      # Sprint 4 / S4-T6: era detail + per-era slashes. Declared above the
+      # less-specific /eras handler to keep longest-prefix order explicit.
+      get("/eras/:n", V2.SubstrateController, :era_detail)
+      get("/eras/:n/slashes", V2.SubstrateController, :era_slashes)
       get("/slashing", V2.SubstrateController, :slashing)
       get("/pwroko/recent", V2.SubstrateController, :pwroko_recent)
+      # Sprint 4 / S4-T7: canonical pwROKO-history endpoint, addressable by
+      # any 20- or 32-byte account hex (not just validator stashes).
+      get(
+        "/accounts/:address_param/pwroko-history",
+        V2.SubstrateController,
+        :account_pwroko_history
+      )
     end
   end
 

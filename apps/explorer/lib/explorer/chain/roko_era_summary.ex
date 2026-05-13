@@ -32,6 +32,11 @@ defmodule Explorer.Chain.RokoEraSummary do
       limit: ^limit
     )
   end
+
+  @doc "Lookup the era_summaries row for a specific era_index."
+  def by_index_query(era_index) when is_integer(era_index) do
+    from(e in __MODULE__, where: e.era_index == ^era_index)
+  end
 end
 
 defmodule Explorer.Chain.RokoSlashingEvent do
@@ -69,6 +74,15 @@ defmodule Explorer.Chain.RokoSlashingEvent do
   def for_stash_query(stash_bytes, limit \\ 100) do
     from(s in __MODULE__,
       where: s.stash == ^stash_bytes,
+      order_by: [desc: s.block_number, desc: s.id],
+      limit: ^limit
+    )
+  end
+
+  @doc "Slashing events that occurred during a specific era."
+  def by_era_query(era_index, limit \\ 500) when is_integer(era_index) do
+    from(s in __MODULE__,
+      where: s.era_index == ^era_index,
       order_by: [desc: s.block_number, desc: s.id],
       limit: ^limit
     )
