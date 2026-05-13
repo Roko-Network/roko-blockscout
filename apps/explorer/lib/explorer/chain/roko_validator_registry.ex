@@ -14,7 +14,8 @@ defmodule Explorer.Chain.RokoValidatorRegistry do
   import Ecto.Query
 
   @primary_key {:stash, :binary, autogenerate: false}
-  schema "roko.validator_registry" do
+  @schema_prefix "roko"
+  schema "validator_registry" do
     field(:controller, :binary)
     field(:authority_index, :integer)
     field(:session_keys, :map)
