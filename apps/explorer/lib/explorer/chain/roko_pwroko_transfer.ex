@@ -9,7 +9,8 @@ defmodule Explorer.Chain.RokoPwrokoTransfer do
   import Ecto.Query
 
   @primary_key {:id, :id, autogenerate: true}
-  schema "roko.pwroko_transfers" do
+  @schema_prefix "roko"
+  schema "pwroko_transfers" do
     field(:block_number, :integer)
     field(:block_hash, :binary)
     field(:extrinsic_index, :integer)

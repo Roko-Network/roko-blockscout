@@ -9,7 +9,8 @@ defmodule Explorer.Chain.RokoEraSummary do
   import Ecto.Query
 
   @primary_key {:era_index, :integer, autogenerate: false}
-  schema "roko.era_summaries" do
+  @schema_prefix "roko"
+  schema "era_summaries" do
     field(:start_block, :integer)
     field(:end_block, :integer)
     field(:start_session, :integer)
@@ -44,7 +45,8 @@ defmodule Explorer.Chain.RokoSlashingEvent do
   import Ecto.Query
 
   @primary_key {:id, :id, autogenerate: true}
-  schema "roko.slashing_events" do
+  @schema_prefix "roko"
+  schema "slashing_events" do
     field(:era_index, :integer)
     field(:block_number, :integer)
     field(:block_hash, :binary)
