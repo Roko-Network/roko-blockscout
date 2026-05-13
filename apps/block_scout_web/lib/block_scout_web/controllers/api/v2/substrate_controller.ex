@@ -12,13 +12,21 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
   - GET /api/v2/substrate/validators
   - GET /api/v2/substrate/validators/:stash
   - GET /api/v2/substrate/validators/:stash/violations
-  - GET /api/v2/substrate/validators/:stash/pwroko-history
+  - GET /api/v2/substrate/validators/:stash/pwroko-history (alias)
   - GET /api/v2/substrate/eras
   - GET /api/v2/substrate/slashing
   - GET /api/v2/substrate/pwroko/recent
+
+  Endpoints added in Sprint 4 (S4-T6/T7/T8):
+  - GET /api/v2/substrate/eras/:n
+  - GET /api/v2/substrate/eras/:n/slashes
+  - GET /api/v2/substrate/accounts/:address_param/pwroko-history
+  - GET /api/v2/substrate/validators/:stash/clock-attestation
   """
 
   use BlockScoutWeb, :controller
+
+  require Logger
 
   alias Explorer.Repo
 
@@ -29,6 +37,8 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
     RokoTimesyncViolation,
     RokoValidatorRegistry
   }
+
+  alias BlockScoutWeb.Substrate.StorageKey
 
   @doc "List active validators."
   @spec validators(Plug.Conn.t(), map()) :: Plug.Conn.t()
@@ -75,12 +85,19 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
     end
   end
 
-  @doc "pwROKO transfer history for an account (either side)."
-  @spec validator_pwroko_history(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def validator_pwroko_history(conn, %{"stash" => stash_hex} = params) do
-    limit = parse_limit(params["limit"], 100, 500)
+  @doc """
+  pwROKO transfer history for any account (either side of the transfer).
 
-    case decode_stash(stash_hex) do
+  Sprint 4 / S4-T7: lives at `/accounts/:address_param/pwroko-history`. The
+  legacy `/validators/:stash/pwroko-history` route still points here for
+  backwards compatibility (the old action name is kept as a thin alias).
+  """
+  @spec account_pwroko_history(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def account_pwroko_history(conn, params) do
+    limit = parse_limit(params["limit"], 100, 500)
+    raw = params["address_param"] || params["stash"]
+
+    case decode_stash(raw) do
       {:ok, bytes} ->
         rows =
           RokoPwrokoTransfer.for_account_query(bytes, limit)
@@ -94,6 +111,10 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
     end
   end
 
+  @doc "Alias kept so the legacy `/validators/:stash/pwroko-history` route keeps working."
+  @spec validator_pwroko_history(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def validator_pwroko_history(conn, params), do: account_pwroko_history(conn, params)
+
   @doc "Recent eras."
   @spec eras(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def eras(conn, params) do
@@ -105,6 +126,48 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
       |> Enum.map(&serialize_era/1)
 
     json(conn, %{items: rows})
+  end
+
+  @doc "Single era summary by era_index."
+  @spec era_detail(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def era_detail(conn, %{"n" => n_str}) do
+    case Integer.parse(n_str) do
+      {n, _} when n >= 0 ->
+        case Repo.one(RokoEraSummary.by_index_query(n)) do
+          nil -> conn |> put_status(404) |> json(%{error: "era not found"})
+          era -> json(conn, serialize_era(era))
+        end
+
+      _ ->
+        conn |> put_status(400) |> json(%{error: "invalid era index"})
+    end
+  end
+
+  @doc "Slashing events that occurred during a given era."
+  @spec era_slashes(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def era_slashes(conn, %{"n" => n_str} = params) do
+    limit = parse_limit(params["limit"], 100, 500)
+
+    case Integer.parse(n_str) do
+      {n, _} when n >= 0 ->
+        # The era summary row must exist for us to return slashes — keeps
+        # this endpoint's 404 semantics consistent with /eras/:n.
+        case Repo.one(RokoEraSummary.by_index_query(n)) do
+          nil ->
+            conn |> put_status(404) |> json(%{error: "era not found"})
+
+          _ ->
+            rows =
+              RokoSlashingEvent.by_era_query(n, limit)
+              |> Repo.all()
+              |> Enum.map(&serialize_slash/1)
+
+            json(conn, %{items: rows})
+        end
+
+      _ ->
+        conn |> put_status(400) |> json(%{error: "invalid era index"})
+    end
   end
 
   @doc "Recent slashing events (across all validators)."
@@ -139,6 +202,46 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
 
     rows = query |> Repo.all() |> Enum.map(&serialize_pwroko/1)
     json(conn, %{items: rows})
+  end
+
+  @doc """
+  Returns the validator's self-attested clock hardware report (Sprint 4 / S4-T8).
+
+  Reads `timeSync.clockAttestations(stash)` via `state_getStorage` on the
+  substrate RPC, then SCALE-decodes the `ClockAttestation` record. 404 when
+  the validator has not yet submitted an attestation.
+  """
+  @spec validator_clock_attestation(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def validator_clock_attestation(conn, %{"stash" => stash_hex}) do
+    case decode_stash(stash_hex) do
+      :error ->
+        conn |> put_status(400) |> json(%{error: "invalid stash hex"})
+
+      {:ok, bytes} ->
+        storage_key =
+          "0x" <>
+            Base.encode16(
+              StorageKey.map_key("TimeSync", "ClockAttestations", bytes),
+              case: :lower
+            )
+
+        case rpc_call("state_getStorage", [storage_key]) do
+          {:ok, nil} ->
+            conn |> put_status(404) |> json(%{error: "no attestation submitted"})
+
+          {:ok, "0x"} ->
+            conn |> put_status(404) |> json(%{error: "no attestation submitted"})
+
+          {:ok, hex_value} when is_binary(hex_value) ->
+            case decode_clock_attestation(hex_value) do
+              {:ok, attestation} -> json(conn, attestation)
+              {:error, reason} -> conn |> put_status(502) |> json(%{error: reason})
+            end
+
+          {:error, reason} ->
+            conn |> put_status(502) |> json(%{error: reason})
+        end
+    end
   end
 
   # --- Serializers ----------------------------------------------------------
@@ -232,14 +335,87 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
 
   defp decode_stash("0x" <> hex_str), do: decode_stash(hex_str)
 
+  # Accepts both H160 (20-byte, the Roko default) and AccountId32 (32-byte) so
+  # this controller works regardless of which account type the underlying
+  # storage uses. The `roko.validator_registry` table is currently populated
+  # with H160 stashes; older substrate tooling sometimes encodes them padded
+  # to 32 bytes — both are accepted.
   defp decode_stash(hex_str) when is_binary(hex_str) do
     case Base.decode16(hex_str, case: :mixed) do
-      {:ok, bytes} when byte_size(bytes) == 32 -> {:ok, bytes}
+      {:ok, bytes} when byte_size(bytes) in [20, 32] -> {:ok, bytes}
       _ -> :error
     end
   end
 
   defp decode_stash(_), do: :error
+
+  # --- SCALE decoding of ClockAttestation ----------------------------------
+
+  # ClockAttestation layout (see node/primitives/src/timesync.rs):
+  #   detected_source            : u8  (ClockSource enum variant)
+  #   root_distance_ns           : u64 little-endian
+  #   calibration_window_blocks  : u32 little-endian
+  #   attested_at_block          : u32 little-endian
+  defp decode_clock_attestation("0x" <> hex), do: decode_clock_attestation(hex)
+
+  defp decode_clock_attestation(hex) when is_binary(hex) do
+    case Base.decode16(hex, case: :mixed) do
+      {:ok,
+       <<source_byte, root_distance_ns::little-unsigned-integer-size(64),
+         calibration_window_blocks::little-unsigned-integer-size(32),
+         attested_at_block::little-unsigned-integer-size(32), _rest::binary>>} ->
+        {:ok,
+         %{
+           detected_source: clock_source_label(source_byte),
+           detected_source_index: source_byte,
+           root_distance_ns: root_distance_ns,
+           calibration_window_blocks: calibration_window_blocks,
+           attested_at_block: attested_at_block
+         }}
+
+      _ ->
+        {:error, "could not decode ClockAttestation"}
+    end
+  end
+
+  defp clock_source_label(0), do: "Pps"
+  defp clock_source_label(1), do: "Timebeat"
+  defp clock_source_label(2), do: "Phc"
+  defp clock_source_label(3), do: "NtpSynced"
+  defp clock_source_label(4), do: "SystemOnly"
+  defp clock_source_label(_), do: "Unknown"
+
+  # --- JSON-RPC passthrough (mirrors TemporalController.rpc_call/2) ---------
+
+  @spec rpc_call(String.t(), list()) :: {:ok, term()} | {:error, String.t()}
+  defp rpc_call(method, params) do
+    url = rpc_url()
+    body = Jason.encode!(%{jsonrpc: "2.0", method: method, params: params, id: 1})
+    headers = [{"Content-Type", "application/json"}]
+
+    case HTTPoison.post(url, body, headers, recv_timeout: 10_000, timeout: 15_000) do
+      {:ok, %HTTPoison.Response{status_code: 200, body: response_body}} ->
+        case Jason.decode(response_body) do
+          {:ok, %{"result" => result}} -> {:ok, result}
+          {:ok, %{"error" => %{"message" => message}}} -> {:error, message}
+          {:ok, %{"error" => error}} -> {:error, inspect(error)}
+          _ -> {:error, "invalid JSON response from upstream"}
+        end
+
+      {:ok, %HTTPoison.Response{status_code: code}} ->
+        {:error, "upstream HTTP #{code}"}
+
+      {:error, %HTTPoison.Error{reason: reason}} ->
+        Logger.warning("Substrate RPC call to #{url} failed: #{inspect(reason)}")
+        {:error, to_string(reason)}
+    end
+  end
+
+  defp rpc_url do
+    Application.get_env(:block_scout_web, :roko_rpc_url) ||
+      System.get_env("ETHEREUM_JSONRPC_HTTP_URL") ||
+      "http://localhost:8545"
+  end
 
   defp parse_limit(nil, default, _max), do: default
 
