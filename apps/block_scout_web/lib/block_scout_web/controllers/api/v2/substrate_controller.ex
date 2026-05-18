@@ -28,10 +28,15 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
 
   require Logger
 
+  import Ecto.Query, only: [from: 2]
+
   alias Explorer.Repo
 
   alias Explorer.Chain.{
+    RokoBlockAuthor,
     RokoEraSummary,
+    RokoEvent,
+    RokoExtrinsic,
     RokoPwrokoTransfer,
     RokoSlashingEvent,
     RokoTimesyncViolation,
@@ -244,6 +249,241 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
     end
   end
 
+  # --------------------------------------------------------------------------
+  # Sprint 5 — substrate extrinsic + event visibility endpoints
+  # --------------------------------------------------------------------------
+
+  @doc """
+  Extrinsics in a block + the block's author (S5-T5).
+
+  Returns `{items: [...], author: {...} | nil}`. The author block comes
+  from `roko.block_authors`; it'll be `null` for blocks the sidecar
+  hasn't indexed yet, or for blocks the BABE digest decode skipped.
+  """
+  @spec block_extrinsics(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def block_extrinsics(conn, %{"n" => n_str}) do
+    case Integer.parse(n_str) do
+      {n, _} when n >= 0 ->
+        items =
+          RokoExtrinsic.by_block_query(n)
+          |> Repo.all()
+          |> Enum.map(&serialize_extrinsic/1)
+
+        author =
+          case Repo.one(RokoBlockAuthor.by_block_query(n)) do
+            nil -> nil
+            row -> serialize_block_author(row)
+          end
+
+        json(conn, %{items: items, author: author})
+
+      _ ->
+        conn |> put_status(400) |> json(%{error: "invalid block number"})
+    end
+  end
+
+  @doc "Events in a block (S5-T5)."
+  @spec block_events(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def block_events(conn, %{"n" => n_str}) do
+    case Integer.parse(n_str) do
+      {n, _} when n >= 0 ->
+        items =
+          RokoEvent.by_block_query(n)
+          |> Repo.all()
+          |> Enum.map(&serialize_event/1)
+
+        json(conn, %{items: items})
+
+      _ ->
+        conn |> put_status(400) |> json(%{error: "invalid block number"})
+    end
+  end
+
+  @doc "Signed-only extrinsics for an address (S5-T6)."
+  @spec account_extrinsics(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def account_extrinsics(conn, params) do
+    limit = parse_limit(params["limit"], 100, 500)
+    raw = params["address_param"]
+
+    case decode_stash(raw) do
+      {:ok, bytes} ->
+        items =
+          RokoExtrinsic.by_signer_query(bytes, limit)
+          |> Repo.all()
+          |> Enum.map(&serialize_extrinsic/1)
+
+        json(conn, %{items: items})
+
+      :error ->
+        conn |> put_status(400) |> json(%{error: "invalid account hex"})
+    end
+  end
+
+  @doc """
+  Single extrinsic by hash (S5-T7). Accepts either the encoded-extrinsic
+  hash or the call hash — both are matched. Includes the events emitted
+  by this extrinsic from `roko.events` for the extrinsic-detail page.
+  """
+  @spec extrinsic_by_hash(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def extrinsic_by_hash(conn, %{"hash" => hash_hex}) do
+    case decode_hash(hash_hex) do
+      {:ok, bytes} ->
+        case Repo.one(RokoExtrinsic.by_hash_query(bytes)) do
+          nil ->
+            conn |> put_status(404) |> json(%{error: "extrinsic not found"})
+
+          ext ->
+            events =
+              RokoEvent.by_extrinsic_query(ext.block_number, ext.index_in_block)
+              |> Repo.all()
+              |> Enum.map(&serialize_event/1)
+
+            payload = serialize_extrinsic(ext) |> Map.put(:events, events)
+            json(conn, payload)
+        end
+
+      :error ->
+        conn |> put_status(400) |> json(%{error: "invalid hash hex"})
+    end
+  end
+
+  @doc "Recent extrinsics feed, optionally filtered by pallet/method (S5-T7)."
+  @spec extrinsics_recent(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def extrinsics_recent(conn, params) do
+    limit = parse_limit(params["limit"], 50, 500)
+
+    opts =
+      []
+      |> maybe_put(:pallet, params["pallet"])
+      |> maybe_put(:method, params["method"])
+      |> Keyword.put(:limit, limit)
+
+    items =
+      RokoExtrinsic.recent_query(opts)
+      |> Repo.all()
+      |> Enum.map(&serialize_extrinsic/1)
+
+    json(conn, %{items: items})
+  end
+
+  @doc """
+  Substrate-side stats summary (S5-T8). Parallel to Blockscout's EVM-shaped
+  `/api/v2/stats` (which reports `total_transactions: 0` since the chain is
+  used substrate-side, not EVM-side).
+  """
+  @spec stats(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def stats(conn, _params) do
+    # Latest known block number (max of indexed extrinsics — equivalent to
+    # the sidecar cursor for our purposes).
+    latest_block =
+      Repo.one(
+        from(e in RokoExtrinsic, select: max(e.block_number))
+      ) || 0
+
+    # 24h window assuming testnet 2s blocks: 43200 blocks/day.
+    # For mainnet (3s blocks) this overshoots slightly — close enough for
+    # a stats summary; precise per-time-window queries can use recorded_at.
+    window_start = max(latest_block - 43_200, 0)
+
+    total_extrinsics =
+      Repo.one(from(e in RokoExtrinsic, select: count(e.id))) || 0
+
+    signed_24h =
+      Repo.one(
+        from(e in RokoExtrinsic,
+          where: e.block_number >= ^window_start and e.extrinsic_class == "Signed",
+          select: count(e.id)
+        )
+      ) || 0
+
+    inherent_24h =
+      Repo.one(
+        from(e in RokoExtrinsic,
+          where: e.block_number >= ^window_start and e.extrinsic_class == "Inherent",
+          select: count(e.id)
+        )
+      ) || 0
+
+    unsigned_24h =
+      Repo.one(
+        from(e in RokoExtrinsic,
+          where: e.block_number >= ^window_start and e.extrinsic_class == "Unsigned",
+          select: count(e.id)
+        )
+      ) || 0
+
+    total_events_24h =
+      Repo.one(
+        from(e in RokoEvent,
+          where: e.block_number >= ^window_start,
+          select: count(e.id)
+        )
+      ) || 0
+
+    blocks_24h = max(latest_block - window_start, 1)
+    avg_ext_per_block =
+      Float.round((signed_24h + inherent_24h + unsigned_24h) / blocks_24h, 2)
+
+    top_pallets =
+      Repo.all(
+        from(e in RokoExtrinsic,
+          where: e.block_number >= ^window_start,
+          group_by: [e.pallet, e.method],
+          select: %{pallet: e.pallet, method: e.method, count: count(e.id)},
+          order_by: [desc: count(e.id)],
+          limit: 10
+        )
+      )
+
+    block_authors =
+      RokoBlockAuthor.authored_counts_query(window_start)
+      |> Repo.all()
+      |> Enum.map(fn {stash, count} -> %{author_stash: hex(stash), blocks: count} end)
+
+    json(conn, %{
+      latest_block: latest_block,
+      total_extrinsics: total_extrinsics,
+      signed_extrinsics_24h: signed_24h,
+      inherent_extrinsics_24h: inherent_24h,
+      unsigned_extrinsics_24h: unsigned_24h,
+      total_events_24h: total_events_24h,
+      avg_extrinsics_per_block: avg_ext_per_block,
+      top_pallets_24h: top_pallets,
+      block_authors_24h: block_authors
+    })
+  end
+
+  @doc """
+  Extension to the global search bar (S5-T9): given a 32-byte hex value,
+  see if it matches a substrate block hash or an extrinsic/call hash and
+  return the canonical link for the frontend to redirect to. Returns 404
+  when no substrate-side match exists; frontend then falls back to
+  Blockscout's existing EVM lookup.
+  """
+  @spec search_substrate_hash(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def search_substrate_hash(conn, %{"hash" => hash_hex}) do
+    case decode_hash(hash_hex) do
+      {:ok, bytes} when byte_size(bytes) == 32 ->
+        cond do
+          author = Repo.one(RokoBlockAuthor.by_substrate_hash_query(bytes)) ->
+            json(conn, %{kind: "block", block_number: author.block_number})
+
+          ext = Repo.one(RokoExtrinsic.by_hash_query(bytes)) ->
+            json(conn, %{
+              kind: "extrinsic",
+              block_number: ext.block_number,
+              index_in_block: ext.index_in_block
+            })
+
+          true ->
+            conn |> put_status(404) |> json(%{error: "no substrate match"})
+        end
+
+      _ ->
+        conn |> put_status(400) |> json(%{error: "expected 32-byte hex hash"})
+    end
+  end
+
   # --- Serializers ----------------------------------------------------------
 
   defp serialize_validator(v) do
@@ -309,6 +549,54 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
     }
   end
 
+  defp serialize_extrinsic(e) do
+    %{
+      id: e.id,
+      block_number: e.block_number,
+      block_hash: hex(e.block_hash),
+      index_in_block: e.index_in_block,
+      pallet: e.pallet,
+      method: e.method,
+      args: e.args,
+      args_truncated: e.args_truncated,
+      signer: hex(e.signer),
+      signature: hex(e.signature),
+      tip: decimal_to_string(e.tip),
+      era: e.era,
+      nonce: e.nonce,
+      fee_paid: decimal_to_string(e.fee_paid),
+      success: e.success,
+      error: e.error,
+      hash: hex(e.hash),
+      call_hash: hex(e.call_hash),
+      extrinsic_class: e.extrinsic_class
+    }
+  end
+
+  defp serialize_event(ev) do
+    %{
+      id: ev.id,
+      block_number: ev.block_number,
+      block_hash: hex(ev.block_hash),
+      extrinsic_index: ev.extrinsic_index,
+      phase: ev.phase,
+      index_in_block: ev.index_in_block,
+      pallet: ev.pallet,
+      method: ev.method,
+      data: ev.data
+    }
+  end
+
+  defp serialize_block_author(b) do
+    %{
+      block_number: b.block_number,
+      block_hash: hex(b.block_hash),
+      author_index: b.author_index,
+      author_stash: hex(b.author_stash),
+      slot: b.slot
+    }
+  end
+
   defp serialize_slash(s) do
     %{
       id: s.id,
@@ -348,6 +636,24 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
   end
 
   defp decode_stash(_), do: :error
+
+  # Sprint 5: accepts 32-byte hex (block hash / extrinsic hash / call hash).
+  # No length variants — substrate hashes are always 32 bytes.
+  defp decode_hash("0x" <> hex_str), do: decode_hash(hex_str)
+
+  defp decode_hash(hex_str) when is_binary(hex_str) do
+    case Base.decode16(hex_str, case: :mixed) do
+      {:ok, bytes} when byte_size(bytes) == 32 -> {:ok, bytes}
+      _ -> :error
+    end
+  end
+
+  defp decode_hash(_), do: :error
+
+  # Conditional Keyword.put — used by /extrinsics/recent to skip nil filter args.
+  defp maybe_put(keyword, _key, nil), do: keyword
+  defp maybe_put(keyword, _key, ""), do: keyword
+  defp maybe_put(keyword, key, value), do: Keyword.put(keyword, key, value)
 
   # --- SCALE decoding of ClockAttestation ----------------------------------
 
