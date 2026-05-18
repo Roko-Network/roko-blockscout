@@ -541,6 +541,19 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
         V2.SubstrateController,
         :account_pwroko_history
       )
+
+      # Sprint 5 / S5-T5..T9: extrinsic + event visibility + search.
+      get("/blocks/:n/extrinsics", V2.SubstrateController, :block_extrinsics)
+      get("/blocks/:n/events", V2.SubstrateController, :block_events)
+      get(
+        "/accounts/:address_param/extrinsics",
+        V2.SubstrateController,
+        :account_extrinsics
+      )
+      get("/extrinsics/recent", V2.SubstrateController, :extrinsics_recent)
+      get("/extrinsics/:hash", V2.SubstrateController, :extrinsic_by_hash)
+      get("/stats", V2.SubstrateController, :stats)
+      get("/search/:hash", V2.SubstrateController, :search_substrate_hash)
     end
   end
 
