@@ -572,10 +572,20 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
       get("/extrinsics/:hash", V2.SubstrateController, :extrinsic_by_hash)
       get("/stats", V2.SubstrateController, :stats)
       get("/search/:hash", V2.SubstrateController, :search_substrate_hash)
-      # Sprint 5 — same-origin JSON-RPC proxy for the browser-side
-      # @polkadot/api in the Developer Console.
-      post("/rpc", V2.SubstrateController, :rpc_proxy)
     end
+  end
+
+  # Sprint 5 — same-origin JSON-RPC proxy for the browser-side
+  # @polkadot/api in the Developer Console. Lives in :api_v2_no_session
+  # because the default :api_v2 pipeline runs Plug.CSRFProtection
+  # (protect_from_forgery), which 403s any browser POST without a fetched
+  # token. The proxy is a stateless read-only forwarder to the chain RPC,
+  # so it's the same shape as /v2/import POSTs that already use this
+  # pipeline.
+  scope "/v2/substrate", as: :api_v2_substrate_no_session do
+    pipe_through(:api_v2_no_session)
+
+    post("/rpc", V2.SubstrateController, :rpc_proxy)
   end
 
   scope "/v1/graphql" do
