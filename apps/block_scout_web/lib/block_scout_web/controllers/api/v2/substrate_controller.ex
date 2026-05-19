@@ -706,8 +706,20 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
   HttpProvider at `/api/v2/substrate/rpc`.
   """
   @spec rpc_proxy(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def rpc_proxy(conn, _params) do
-    {:ok, body, conn} = Plug.Conn.read_body(conn, length: 1_048_576)
+  def rpc_proxy(conn, params) do
+    # The :api_v2_no_session pipeline runs Plug.Parsers before this action,
+    # so the raw body has already been consumed and parsed into conn.body_params.
+    # Re-serialize from the parsed map (matches what the JSON-RPC client sent).
+    body =
+      case conn.body_params do
+        # JSON-RPC batch requests are a top-level array; Plug.Parsers
+        # wraps that under the "_json" key.
+        %{"_json" => batch} when is_list(batch) -> Jason.encode!(batch)
+        %Plug.Conn.Unfetched{} -> Jason.encode!(params)
+        %{} = parsed when map_size(parsed) > 0 -> Jason.encode!(parsed)
+        _ -> Jason.encode!(params)
+      end
+
     url = rpc_url()
     headers = [{"Content-Type", "application/json"}]
 
