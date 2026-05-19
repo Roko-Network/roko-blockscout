@@ -691,6 +691,49 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
   defp clock_source_label(4), do: "SystemOnly"
   defp clock_source_label(_), do: "Unknown"
 
+  @doc """
+  Sprint 5 — same-origin JSON-RPC proxy for the Developer Console.
+
+  The Developer Console's @polkadot/api browser-side stack would otherwise
+  hit the chain's HTTPS RPC cross-origin, which (a) needs CORS preflight on
+  every request and (b) sometimes wedges in the browser for reasons that
+  don't reproduce server-side. Routing through this same-origin endpoint
+  avoids both: the browser makes one POST to its own host, the backend
+  forwards verbatim to the substrate node.
+
+  Accepts a standard JSON-RPC envelope in the request body and returns the
+  upstream substrate response verbatim. The frontend points its
+  HttpProvider at `/api/v2/substrate/rpc`.
+  """
+  @spec rpc_proxy(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def rpc_proxy(conn, _params) do
+    {:ok, body, conn} = Plug.Conn.read_body(conn, length: 1_048_576)
+    url = rpc_url()
+    headers = [{"Content-Type", "application/json"}]
+
+    case HTTPoison.post(url, body, headers, recv_timeout: 30_000, timeout: 30_000) do
+      {:ok, %HTTPoison.Response{status_code: status, body: response_body}} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> put_resp_header("access-control-allow-origin", "*")
+        |> send_resp(status, response_body)
+
+      {:error, %HTTPoison.Error{reason: reason}} ->
+        Logger.warning("Substrate RPC proxy to #{url} failed: #{inspect(reason)}")
+
+        envelope =
+          Jason.encode!(%{
+            "jsonrpc" => "2.0",
+            "id" => nil,
+            "error" => %{"code" => -32000, "message" => "upstream unreachable: #{inspect(reason)}"}
+          })
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(502, envelope)
+    end
+  end
+
   # --- JSON-RPC passthrough (mirrors TemporalController.rpc_call/2) ---------
 
   @spec rpc_call(String.t(), list()) :: {:ok, term()} | {:error, String.t()}

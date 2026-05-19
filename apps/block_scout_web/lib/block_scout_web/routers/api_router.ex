@@ -554,6 +554,9 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
       get("/extrinsics/:hash", V2.SubstrateController, :extrinsic_by_hash)
       get("/stats", V2.SubstrateController, :stats)
       get("/search/:hash", V2.SubstrateController, :search_substrate_hash)
+      # Sprint 5 — same-origin JSON-RPC proxy for the browser-side
+      # @polkadot/api in the Developer Console.
+      post("/rpc", V2.SubstrateController, :rpc_proxy)
     end
   end
 
