@@ -65,6 +65,18 @@ defmodule Explorer.Chain.RokoExtrinsic do
   end
 
   @doc """
+  Per-block extrinsic counts for a batch of block numbers. Used by the
+  EVM-side blocks list to enrich each row with a substrate count column.
+  """
+  def counts_by_blocks_query(block_numbers) when is_list(block_numbers) do
+    from(e in __MODULE__,
+      where: e.block_number in ^block_numbers,
+      group_by: e.block_number,
+      select: {e.block_number, count(e.id)}
+    )
+  end
+
+  @doc """
   Recent feed, optionally filtered by (pallet, method) and paginated via a
   `(block_number, index_in_block)` cursor. Pass the `next_page_params` from
   the previous response back as `:before_block` + `:before_index` to scroll

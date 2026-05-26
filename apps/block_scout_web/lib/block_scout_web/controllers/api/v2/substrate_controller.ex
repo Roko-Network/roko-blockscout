@@ -385,6 +385,43 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
   end
 
   @doc """
+  Per-block extrinsic counts for a comma-separated list of block numbers.
+
+  Used by the EVM-side blocks list to enrich each row with a substrate count
+  column without modifying Blockscout's standard `/api/v2/blocks` response
+  shape. Capped at 200 numbers per call. Missing blocks are returned as 0
+  so the client gets a complete map.
+  """
+  @spec block_counts(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def block_counts(conn, %{"numbers" => raw}) when is_binary(raw) do
+    numbers =
+      raw
+      |> String.split(",", trim: true)
+      |> Enum.flat_map(fn s ->
+        case Integer.parse(s) do
+          {n, _} when n >= 0 -> [n]
+          _ -> []
+        end
+      end)
+      |> Enum.uniq()
+      |> Enum.take(200)
+
+    counts =
+      RokoExtrinsic.counts_by_blocks_query(numbers)
+      |> Repo.all()
+      |> Enum.into(%{}, fn {block_number, count} -> {block_number, count} end)
+
+    full_counts =
+      Enum.into(numbers, %{}, fn n -> {n, Map.get(counts, n, 0)} end)
+
+    json(conn, %{counts: full_counts})
+  end
+
+  def block_counts(conn, _params) do
+    conn |> put_status(400) |> json(%{error: "?numbers=N1,N2,... required"})
+  end
+
+  @doc """
   Substrate-side stats summary (S5-T8). Parallel to Blockscout's EVM-shaped
   `/api/v2/stats` (which reports `total_transactions: 0` since the chain is
   used substrate-side, not EVM-side).
