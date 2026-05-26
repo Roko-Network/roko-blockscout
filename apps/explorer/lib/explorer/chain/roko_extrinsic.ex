@@ -64,11 +64,18 @@ defmodule Explorer.Chain.RokoExtrinsic do
     )
   end
 
-  @doc "Recent feed, optionally filtered by (pallet, method)."
+  @doc """
+  Recent feed, optionally filtered by (pallet, method) and paginated via a
+  `(block_number, index_in_block)` cursor. Pass the `next_page_params` from
+  the previous response back as `:before_block` + `:before_index` to scroll
+  backwards through the feed.
+  """
   def recent_query(opts \\ []) do
     pallet = Keyword.get(opts, :pallet)
     method = Keyword.get(opts, :method)
     limit = Keyword.get(opts, :limit, 50)
+    before_block = Keyword.get(opts, :before_block)
+    before_index = Keyword.get(opts, :before_index)
 
     base =
       from(e in __MODULE__,
@@ -77,6 +84,16 @@ defmodule Explorer.Chain.RokoExtrinsic do
       )
 
     base = if pallet, do: from(e in base, where: e.pallet == ^pallet), else: base
-    if method, do: from(e in base, where: e.method == ^method), else: base
+    base = if method, do: from(e in base, where: e.method == ^method), else: base
+
+    if is_integer(before_block) and is_integer(before_index) do
+      from(e in base,
+        where:
+          e.block_number < ^before_block or
+            (e.block_number == ^before_block and e.index_in_block < ^before_index)
+      )
+    else
+      base
+    end
   end
 end
