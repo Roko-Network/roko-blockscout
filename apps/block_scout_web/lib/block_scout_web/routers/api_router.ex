@@ -543,6 +543,9 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
       )
 
       # Sprint 5 / S5-T5..T9: extrinsic + event visibility + search.
+      # /blocks/counts must precede /blocks/:n/* so the literal
+      # "counts" segment isn't matched as a :n path parameter.
+      get("/blocks/counts", V2.SubstrateController, :block_counts)
       get("/blocks/:n/extrinsics", V2.SubstrateController, :block_extrinsics)
       get("/blocks/:n/events", V2.SubstrateController, :block_events)
       get(
