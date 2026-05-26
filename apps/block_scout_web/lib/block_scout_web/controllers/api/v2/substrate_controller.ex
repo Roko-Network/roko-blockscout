@@ -347,15 +347,25 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
     end
   end
 
-  @doc "Recent extrinsics feed, optionally filtered by pallet/method (S5-T7)."
+  @doc """
+  Recent extrinsics feed, optionally filtered by pallet/method, with
+  Blockscout-style cursor pagination via `(block_number, index_in_block)`.
+
+  Pass `next_page_params` from the previous response back as
+  `?block_number=…&index_in_block=…` to get the next page.
+  """
   @spec extrinsics_recent(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def extrinsics_recent(conn, params) do
     limit = parse_limit(params["limit"], 50, 500)
+    before_block = parse_optional_int(params["block_number"])
+    before_index = parse_optional_int(params["index_in_block"])
 
     opts =
       []
       |> maybe_put(:pallet, params["pallet"])
       |> maybe_put(:method, params["method"])
+      |> maybe_put(:before_block, before_block)
+      |> maybe_put(:before_index, before_index)
       |> Keyword.put(:limit, limit)
 
     items =
@@ -363,7 +373,15 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
       |> Repo.all()
       |> Enum.map(&serialize_extrinsic/1)
 
-    json(conn, %{items: items})
+    next_page_params =
+      if length(items) >= limit do
+        last = List.last(items)
+        %{block_number: last.block_number, index_in_block: last.index_in_block}
+      else
+        nil
+      end
+
+    json(conn, %{items: items, next_page_params: next_page_params})
   end
 
   @doc """
@@ -788,4 +806,17 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
   end
 
   defp parse_limit(_, default, _max), do: default
+
+  defp parse_optional_int(nil), do: nil
+  defp parse_optional_int(""), do: nil
+
+  defp parse_optional_int(str) when is_binary(str) do
+    case Integer.parse(str) do
+      {n, _} when n >= 0 -> n
+      _ -> nil
+    end
+  end
+
+  defp parse_optional_int(n) when is_integer(n) and n >= 0, do: n
+  defp parse_optional_int(_), do: nil
 end
