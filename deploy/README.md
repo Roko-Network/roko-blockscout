@@ -2,14 +2,58 @@
 
 This directory holds the docker-compose stack that runs at `roko-explorer.ntfork.com`. It is the source of truth for the production deploy; mirror any changes here when modifying `docker-compose/proxy-roko/default.conf.template` (the dev variant).
 
+## Repos & layout
+
+The explorer is a Blockscout fork split across three repos (all under the `Roko-Network` GitHub org). The two `:local` images are built from source on the host; the sidecar is pulled from GHCR:
+
+| Component | Repo | Image |
+|-----------|------|-------|
+| Backend (Elixir/Phoenix) | `Roko-Network/roko-blockscout` (`master`) | `roko-blockscout-backend:local` (build from source) |
+| Frontend (Next.js) | `Roko-Network/roko-blockscout-frontend` (`main`) | `roko-blockscout-frontend:local` (build from source) |
+| Indexer sidecar (Rust) | `roko_network/sidecar/` | `ghcr.io/roko-network/roko-indexer:testnet-latest-amd64` (pulled) |
+
+This `deploy/` directory lives **inside the backend repo**, but in production it is copied to its own run directory (e.g. `/opt/roko-explorer/`) separate from the source checkouts. The build commands below run from each repo's own root, independent of where the compose stack runs. A typical host layout:
+
+    ~/roko-blockscout/            # backend repo (contains this deploy/ dir)
+    ~/roko-blockscout-frontend/   # frontend repo
+    /opt/roko-explorer/           # copy of deploy/ + the (gitignored) .env secrets; run `docker compose` here
+
 ## Stack
 
 - `db` — postgres:17, persistent volume `postgres-data`
 - `redis-db` — redis:alpine, persistent volume `redis-data`
-- `backend` — `roko-blockscout-backend:local` (built on host via `docker compose build`)
-- `frontend` — `roko-blockscout-frontend:local` (built on host)
+- `backend` — `roko-blockscout-backend:local` (built from the `roko-blockscout` repo — see "Building the images")
+- `frontend` — `roko-blockscout-frontend:local` (built from the `roko-blockscout-frontend` repo)
 - `proxy` — nginx with letsencrypt cert mount + faucet proxy to roko-admin
 - `roko-indexer` — `ghcr.io/roko-network/roko-indexer:testnet-latest-amd64` (substrate-native indexer; writes the `roko.*` schema for `SubstrateController`)
+
+## Building the images
+
+The two `:local` images are built with plain `docker build` from each repo's root. The compose file references them by tag and does **not** build them itself — `docker compose build` is a no-op here, so build them explicitly first:
+
+```bash
+# Backend — from the roko-blockscout repo root.
+# Leave CHAIN_TYPE at its default: Roko's temporal/substrate controllers are
+# compiled unconditionally, and changing CHAIN_TYPE would diverge the DB schema
+# from the running database. Do not pass --build-arg CHAIN_TYPE unless you know why.
+cd ~/roko-blockscout
+docker build -f docker/Dockerfile -t roko-blockscout-backend:local .
+
+# Frontend — from the roko-blockscout-frontend repo root.
+# No build args needed: NEXT_PUBLIC_* are injected at container start by
+# entrypoint.sh from envs/frontend.env, not baked in at build time.
+cd ~/roko-blockscout-frontend
+docker build -t roko-blockscout-frontend:local .
+```
+
+**Frontend must stay on a glibc base.** Its Dockerfile uses `node:22.14.0-bookworm-slim` (Debian), not Alpine: a transitive native addon (`@ipshipyard/node-datachannel`, via libp2p) ships a glibc-only binary that throws `ERR_DLOPEN_FAILED` on musl and 500s every `/address/*` page. This is baked into the Dockerfile — don't switch it back to Alpine.
+
+**Build resources.** The frontend build is memory-hungry (`NODE_OPTIONS=--max-old-space-size=8192`); on a small instance (e.g. t3.small, ~3.7 GB) add temporary swap or it OOM-kills, and budget ~90 min on 2 vCPUs. The backend (Elixir release) is also heavy. Example swap:
+
+```bash
+sudo fallocate -l 6G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+# (not added to /etc/fstab → gone on reboot; `sudo swapoff /swapfile && sudo rm /swapfile` to remove)
+```
 
 ## First-time setup
 
@@ -39,18 +83,27 @@ docker compose up -d db redis-db
 #    to blockscout. Replace CHANGEME with the value of $INDEXER_PASS.
 sed "s|CHANGEME|$INDEXER_PASS|" sql/init-roko-schema.sql | docker compose exec -T db psql -U blockscout blockscout
 
-# 7. Build local images
-docker compose build
+# 7. Build the two :local images from source (see "Building the images").
+#    `docker compose build` does NOT build them — run docker build per repo:
+( cd ~/roko-blockscout            && docker build -f docker/Dockerfile -t roko-blockscout-backend:local . )
+( cd ~/roko-blockscout-frontend   && docker build -t roko-blockscout-frontend:local . )
 
-# 8. Bring up the full stack
+# 8. Bring up the full stack (pulls postgres/redis/nginx/roko-indexer too)
 docker compose up -d
 ```
 
 ## Updating
 
 ```bash
-# Pull latest source on host, then:
-docker compose build backend frontend
+# 1. Pull latest source in each repo on the host:
+( cd ~/roko-blockscout && git pull )
+( cd ~/roko-blockscout-frontend && git pull )
+
+# 2. Rebuild the images that changed (see "Building the images"):
+( cd ~/roko-blockscout            && docker build -f docker/Dockerfile -t roko-blockscout-backend:local . )
+( cd ~/roko-blockscout-frontend   && docker build -t roko-blockscout-frontend:local . )
+
+# 3. Recreate the containers from the new images:
 docker compose up -d
 ```
 
