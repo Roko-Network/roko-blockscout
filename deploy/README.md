@@ -1,6 +1,18 @@
 # roko-explorer deployment scaffold
 
-This directory holds the docker-compose stack that runs at `roko-explorer.ntfork.com`. It is the source of truth for the production deploy; mirror any changes here when modifying `docker-compose/proxy-roko/default.conf.template` (the dev variant).
+This directory holds the docker-compose stack for the ROKO Blockscout explorer.
+
+> **Ingress model (app01, two domains).** The stack now runs on **app01** (internal
+> `s9.internal` VM, no public IP) and serves **HTTP-only** on port 80, routing by
+> `Host` to a per-domain frontend:
+> - `explorer.roko.internal` → `frontend-internal` — TLS terminated on the **oberth** reverse proxy (internal CA).
+> - `explorer.roko.network` → `frontend-public` — TLS at the **Cloudflare edge** via a `cloudflared` tunnel on oberth/DMZ (app01 keeps zero inbound ports).
+>
+> The backend/DB/indexer are shared across both domains. There are **two frontend
+> containers** because the Blockscout frontend bakes a single `NEXT_PUBLIC_*_HOST`.
+> Edge (proxy + tunnel) config and requirements: see [`edge/README.md`](edge/README.md).
+> The legacy single-domain `roko-explorer.ntfork.com` + certbot/443 path below is
+> **superseded** — certbot is not used on app01 (TLS terminates upstream).
 
 ## Repos & layout
 
@@ -64,7 +76,8 @@ sudo fallocate -l 6G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapf
 # 2. Provision secrets (NEVER commit the resulting .env files)
 cp .env.example .env
 cp envs/backend.env.example envs/backend.env
-cp envs/frontend.env.example envs/frontend.env
+cp envs/frontend.internal.env.example envs/frontend.internal.env
+cp envs/frontend.public.env.example  envs/frontend.public.env
 
 # 3. Generate strong passwords for BOTH postgres roles and write into the env files:
 POSTGRES_PASS=$(openssl rand -hex 24)
