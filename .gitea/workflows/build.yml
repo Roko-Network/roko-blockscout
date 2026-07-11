@@ -87,10 +87,20 @@ jobs:
           MOVING_TAG: ${{ steps.tags.outputs.moving }}
         run: |
           set -euo pipefail
+          # RELEASE_VERSION MUST match the mix release version (from mix.exs), else the
+          # Dockerfile copies config_helper.exs to /app/releases/<empty>/ and the backend
+          # crashes at boot ("could not load .../config_helper.exs"). Derive it; don't hardcode.
+          RELEASE_VERSION="$(grep -m1 -E '^[[:space:]]*version:' mix.exs | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+          [ -n "$RELEASE_VERSION" ] || { echo "::error::could not derive RELEASE_VERSION from mix.exs"; exit 1; }
+          SHORT_SHA="$(git rev-parse --short=8 HEAD)"
+          echo "RELEASE_VERSION=$RELEASE_VERSION"
           # Do NOT pass --build-arg CHAIN_TYPE: Roko's temporal/substrate controllers
           # compile unconditionally; changing CHAIN_TYPE diverges the DB schema from the
           # running database. (deploy/README.md)
-          args=(-f docker/Dockerfile -t "${IMAGE}:${SHA_TAG}")
+          args=(-f docker/Dockerfile
+                --build-arg "RELEASE_VERSION=${RELEASE_VERSION}"
+                --build-arg "BLOCKSCOUT_VERSION=v${RELEASE_VERSION}.+commit.${SHORT_SHA}"
+                -t "${IMAGE}:${SHA_TAG}")
           if [ -n "$MOVING_TAG" ]; then args+=(-t "${IMAGE}:${MOVING_TAG}"); fi
           docker build "${args[@]}" .
 
