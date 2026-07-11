@@ -28,7 +28,7 @@ services:
         condition: service_healthy
       redis-db:
         condition: service_started
-    image: roko-blockscout-backend:local
+    image: ${ROKO_BACKEND_IMAGE:-git.integrolabs.net/roko/roko-blockscout-backend:testnet}
     restart: always
     stop_grace_period: 5m
     container_name: backend
@@ -51,7 +51,7 @@ services:
   frontend-internal:
     depends_on:
       - backend
-    image: roko-blockscout-frontend:local
+    image: ${ROKO_FRONTEND_IMAGE:-git.integrolabs.net/roko/roko-blockscout-frontend:testnet}
     restart: always
     container_name: frontend-internal
     env_file:
@@ -60,7 +60,7 @@ services:
   frontend-public:
     depends_on:
       - backend
-    image: roko-blockscout-frontend:local
+    image: ${ROKO_FRONTEND_IMAGE:-git.integrolabs.net/roko/roko-blockscout-frontend:testnet}
     restart: always
     container_name: frontend-public
     env_file:
