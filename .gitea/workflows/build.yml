@@ -9,8 +9,8 @@
 #   this instance. The 58 upstream `.github/workflows/*` stay in the repo untouched
 #   for GitHub delivery, but no longer fire CodeQL / build-matrix on our runners.
 #
-# Runner: `native` = build01 host-mode (s9, docker on host, 16 GB). `native` and
-#   `s9-build` are unique to build01; generic `ubuntu-*` labels are shared with
+# Runner: `s9-build` = build01-unique container-mode (catthehacker act-24.04: git +
+#   docker CLI, host socket mounted, 16 GB). Generic `ubuntu-*` labels are shared with
 #   titan/teroknor and would risk drifting the build off build01.
 #
 # Registry auth: set repo/org Actions secrets REGISTRY_TOKEN (write:package on the
@@ -46,7 +46,7 @@ env:
 jobs:
   build:
     name: Build & push backend image
-    runs-on: native
+    runs-on: s9-build
     steps:
       - name: Checkout (manual clone — host-mode runner has no node for actions/checkout)
         run: |
