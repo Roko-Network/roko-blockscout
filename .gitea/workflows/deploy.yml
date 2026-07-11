@@ -6,7 +6,7 @@
 #
 # When itops#253 provides the host, flesh out the deploy step: ssh to the explorer
 # host, render deploy/.env + deploy/envs/*.env from secrets, `docker compose pull &&
-# up -d` in /opt/roko-explorer, health-check /api/v2/main-page/blocks, roll back to
+# up -d` in /opt/roko-blockscout, health-check /api/v2/main-page/blocks, roll back to
 # the previous image digest on failure. (deploy/README.md, devops#49 Part B)
 
 name: deploy-explorer
@@ -51,7 +51,7 @@ jobs:
 
       # TODO(itops#253): implement once the explorer host is live —
       #   - set up SSH to $DEPLOY_HOST from DEPLOY_SSH_KEY (+ known_hosts pin)
-      #   - in /opt/roko-explorer: render .env + envs/*.env from secrets
+      #   - in /opt/roko-blockscout: render .env + envs/*.env from secrets
       #     (POSTGRES_PASSWORD, ROKO_INDEXER_DB_PASSWORD, ...) — see deploy/README.md
       #   - export the image tags into .env, then: docker compose pull && docker compose up -d
       #   - first deploy only: sql/init-roko-schema.sql (creates roko schema + roko_indexer role)
