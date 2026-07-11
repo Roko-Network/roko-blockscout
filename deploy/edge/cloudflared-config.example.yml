@@ -1,9 +1,9 @@
 # Cloudflare Zero Trust tunnel config for the PUBLIC explorer domain.
 #
 # Runs on an INTERNAL host (oberth, or the DMZ edge) — NOT on a public box and
-# NOT on app01. cloudflared dials OUT to the Cloudflare edge, so app01 keeps zero
-# inbound ports. It forwards to app01's HTTP front and preserves the Host header
-# so app01's nginx routes to frontend-public.
+# NOT on roko-explorer. cloudflared dials OUT to the Cloudflare edge, so roko-explorer keeps zero
+# inbound ports. It forwards to roko-explorer's HTTP front and preserves the Host header
+# so roko-explorer's nginx routes to frontend-public.
 #
 # Setup (once):
 #   cloudflared tunnel login
@@ -22,11 +22,11 @@ credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_UUID.json
 
 ingress:
   - hostname: explorer.roko.network
-    service: http://app01.s9.internal:80
+    service: http://roko-explorer.s9.internal:80
     originRequest:
-      # app01 nginx routes by Host -> send the public hostname so it hits frontend-public
+      # roko-explorer nginx routes by Host -> send the public hostname so it hits frontend-public
       httpHostHeader: explorer.roko.network
       connectTimeout: 30s
-      # app01 is HTTP on the trusted internal net; no origin TLS to verify.
+      # roko-explorer is HTTP on the trusted internal net; no origin TLS to verify.
   # Everything else: refuse.
   - service: http_status:404

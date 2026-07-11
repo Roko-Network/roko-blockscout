@@ -16,8 +16,8 @@ echo "=== Installing certbot ==="
 sudo apt-get install -y -qq certbot
 
 echo "=== Creating deploy directory ==="
-sudo mkdir -p /opt/roko-explorer
-sudo chown ubuntu:ubuntu /opt/roko-explorer
+sudo mkdir -p /opt/roko-blockscout
+sudo chown ubuntu:ubuntu /opt/roko-blockscout
 
 echo "=== Setup complete ==="
 echo "Next steps:"

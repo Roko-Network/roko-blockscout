@@ -66,9 +66,9 @@ services:
     env_file:
       - ./envs/frontend.public.env
 
-  # HTTP-only front. TLS terminates upstream (oberth for explorer.roko.internal,
+  # HTTP-only front. TLS terminates upstream (npm01 (NPM) for explorer.roko.internal,
   # Cloudflare edge for explorer.roko.network via the cloudflared tunnel on oberth).
-  # Publishes 80 on app01's internal interface only (app01 has no public IP).
+  # Publishes 80 on roko-explorer's internal interface only (roko-explorer has no public IP).
   proxy:
     depends_on:
       - backend

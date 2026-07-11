@@ -2,17 +2,17 @@
 
 This directory holds the docker-compose stack for the ROKO Blockscout explorer.
 
-> **Ingress model (app01, two domains).** The stack now runs on **app01** (internal
+> **Ingress model (roko-explorer, two domains).** The stack now runs on **roko-explorer** (internal
 > `s9.internal` VM, no public IP) and serves **HTTP-only** on port 80, routing by
 > `Host` to a per-domain frontend:
-> - `explorer.roko.internal` → `frontend-internal` — TLS terminated on the **oberth** reverse proxy (internal CA).
-> - `explorer.roko.network` → `frontend-public` — TLS at the **Cloudflare edge** via a `cloudflared` tunnel on oberth/DMZ (app01 keeps zero inbound ports).
+> - `explorer.roko.internal` → `frontend-internal` — TLS terminated on **npm01** (NPM, internal CA).
+> - `explorer.roko.network` → `frontend-public` — TLS at the **Cloudflare edge** via a `cloudflared` tunnel on oberth/DMZ (roko-explorer keeps zero inbound ports).
 >
 > The backend/DB/indexer are shared across both domains. There are **two frontend
 > containers** because the Blockscout frontend bakes a single `NEXT_PUBLIC_*_HOST`.
 > Edge (proxy + tunnel) config and requirements: see [`edge/README.md`](edge/README.md).
 > The legacy single-domain `roko-explorer.ntfork.com` + certbot/443 path below is
-> **superseded** — certbot is not used on app01 (TLS terminates upstream).
+> **superseded** — certbot is not used on roko-explorer (TLS terminates upstream).
 
 ## Repos & layout
 
@@ -24,11 +24,11 @@ The explorer is a Blockscout fork split across three repos (all under the `Roko-
 | Frontend (Next.js) | `Roko-Network/roko-blockscout-frontend` (`main`) | `roko-blockscout-frontend:local` (build from source) |
 | Indexer sidecar (Rust) | `roko_network/sidecar/` | `ghcr.io/roko-network/roko-indexer:testnet-latest-amd64` (pulled) |
 
-This `deploy/` directory lives **inside the backend repo**, but in production it is copied to its own run directory (e.g. `/opt/roko-explorer/`) separate from the source checkouts. The build commands below run from each repo's own root, independent of where the compose stack runs. A typical host layout:
+This `deploy/` directory lives **inside the backend repo**, but in production it is copied to its own run directory (e.g. `/opt/roko-blockscout/`) separate from the source checkouts. The build commands below run from each repo's own root, independent of where the compose stack runs. A typical host layout:
 
     ~/roko-blockscout/            # backend repo (contains this deploy/ dir)
     ~/roko-blockscout-frontend/   # frontend repo
-    /opt/roko-explorer/           # copy of deploy/ + the (gitignored) .env secrets; run `docker compose` here
+    /opt/roko-blockscout/           # copy of deploy/ + the (gitignored) .env secrets; run `docker compose` here
 
 ## Stack
 
