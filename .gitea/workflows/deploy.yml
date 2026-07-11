@@ -30,7 +30,7 @@ concurrency:
 jobs:
   deploy:
     name: Deploy to explorer host
-    runs-on: native
+    runs-on: s9-build
     steps:
       - name: Preflight — require explorer host + deploy secrets (itops#253)
         env:
