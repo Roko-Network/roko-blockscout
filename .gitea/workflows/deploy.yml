@@ -1,0 +1,59 @@
+# ROKO Blockscout — Gitea Actions deploy (roctinam/devops#49 Part B)
+#
+# STATUS: STUB — blocked on roctinam/itops#253 (the dedicated explorer host does
+# not exist yet). This workflow is manual-dispatch only and fails fast with a clear
+# message if the host + deploy secrets are absent, so it can never half-deploy.
+#
+# When itops#253 provides the host, flesh out the deploy step: ssh to the explorer
+# host, render deploy/.env + deploy/envs/*.env from secrets, `docker compose pull &&
+# up -d` in /opt/roko-explorer, health-check /api/v2/main-page/blocks, roll back to
+# the previous image digest on failure. (deploy/README.md, devops#49 Part B)
+
+name: deploy-explorer
+
+on:
+  workflow_dispatch:
+    inputs:
+      backend_tag:
+        description: "backend image tag to deploy (e.g. sha-<12> or testnet)"
+        required: true
+        default: "testnet"
+      frontend_tag:
+        description: "frontend image tag to deploy"
+        required: true
+        default: "testnet"
+
+concurrency:
+  group: roko-explorer-deploy       # never two deploys at once
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to explorer host
+    runs-on: native
+    steps:
+      - name: Preflight — require explorer host + deploy secrets (itops#253)
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          missing=0
+          if [ -z "${DEPLOY_HOST:-}" ]; then
+            echo "::error::DEPLOY_HOST not set — deploy is blocked on roctinam/itops#253 (explorer host not provisioned yet)"; missing=1
+          fi
+          if [ -z "${DEPLOY_SSH_KEY:-}" ]; then
+            echo "::error::DEPLOY_SSH_KEY not set — configure once the explorer host exists"; missing=1
+          fi
+          if [ "$missing" != "0" ]; then exit 1; fi
+          echo "Preflight OK for host: ${DEPLOY_HOST}"
+          echo "backend=${{ inputs.backend_tag }} frontend=${{ inputs.frontend_tag }}"
+
+      # TODO(itops#253): implement once the explorer host is live —
+      #   - set up SSH to $DEPLOY_HOST from DEPLOY_SSH_KEY (+ known_hosts pin)
+      #   - in /opt/roko-explorer: render .env + envs/*.env from secrets
+      #     (POSTGRES_PASSWORD, ROKO_INDEXER_DB_PASSWORD, ...) — see deploy/README.md
+      #   - export the image tags into .env, then: docker compose pull && docker compose up -d
+      #   - first deploy only: sql/init-roko-schema.sql (creates roko schema + roko_indexer role)
+      #   - health-check: curl -f https://$DEPLOY_HOST/api/v2/main-page/blocks
+      #   - on failure: roll back to the previous image digest

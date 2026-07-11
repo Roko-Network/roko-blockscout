@@ -1,0 +1,105 @@
+# ROKO Blockscout backend — Gitea Actions build (roctinam/devops#49 Part A)
+#
+# Builds the Elixir/Phoenix backend image on build01 (host mode) and pushes it to
+# the Gitea container registry. Deploy is separate (deploy.yml, blocked on itops#253).
+#
+# Why this file also silences the upstream Blockscout CI on Gitea:
+#   Gitea 1.25 runs workflows from `.gitea/workflows/` OR `.github/workflows/`, and
+#   `.gitea/` takes precedence — when it exists, `.github/workflows/` is ignored on
+#   this instance. The 58 upstream `.github/workflows/*` stay in the repo untouched
+#   for GitHub delivery, but no longer fire CodeQL / build-matrix on our runners.
+#
+# Runner: `native` = build01 host-mode (s9, docker on host, 16 GB). `native` and
+#   `s9-build` are unique to build01; generic `ubuntu-*` labels are shared with
+#   titan/teroknor and would risk drifting the build off build01.
+#
+# Registry auth: set repo/org Actions secrets REGISTRY_TOKEN (write:package on the
+#   `roko` org) and optionally REGISTRY_USERNAME. Falls back to the built-in Actions
+#   token, which may suffice for same-owner package push.
+
+name: build-backend
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+    paths-ignore:
+      - '.gitea/**'
+      - '.github/**'
+      - 'docs/**'
+      - '**.md'
+      - 'deploy/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: roko-blockscout-backend-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: git.integrolabs.net
+  IMAGE: git.integrolabs.net/roko/roko-blockscout-backend
+
+jobs:
+  build:
+    name: Build & push backend image
+    runs-on: native
+    steps:
+      - name: Checkout (manual clone — host-mode runner has no node for actions/checkout)
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch "${GITHUB_REF_NAME:-master}" \
+            "https://token:${{ github.token }}@git.integrolabs.net/${GITHUB_REPOSITORY}.git" .
+          git checkout "${GITHUB_SHA:-HEAD}"
+
+      - name: Registry login
+        env:
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          GITEA_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TOKEN="${REGISTRY_TOKEN:-$GITEA_TOKEN}"
+          USER_NAME="${REGISTRY_USERNAME:-${{ gitea.actor }}}"
+          if [ -z "$TOKEN" ]; then
+            echo "::error::no registry token (set REGISTRY_TOKEN or ensure github.token is available)"; exit 1
+          fi
+          echo "$TOKEN" | docker login "$REGISTRY" -u "$USER_NAME" --password-stdin
+
+      - name: Compute tags
+        id: tags
+        run: |
+          set -euo pipefail
+          SHORT="$(git rev-parse --short=12 HEAD)"
+          echo "sha=sha-${SHORT}" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_NAME:-}" = "master" ]; then
+            echo "moving=testnet" >> "$GITHUB_OUTPUT"
+          else
+            echo "moving=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build backend image
+        env:
+          SHA_TAG: ${{ steps.tags.outputs.sha }}
+          MOVING_TAG: ${{ steps.tags.outputs.moving }}
+        run: |
+          set -euo pipefail
+          # Do NOT pass --build-arg CHAIN_TYPE: Roko's temporal/substrate controllers
+          # compile unconditionally; changing CHAIN_TYPE diverges the DB schema from the
+          # running database. (deploy/README.md)
+          args=(-f docker/Dockerfile -t "${IMAGE}:${SHA_TAG}")
+          if [ -n "$MOVING_TAG" ]; then args+=(-t "${IMAGE}:${MOVING_TAG}"); fi
+          docker build "${args[@]}" .
+
+      - name: Push
+        env:
+          SHA_TAG: ${{ steps.tags.outputs.sha }}
+          MOVING_TAG: ${{ steps.tags.outputs.moving }}
+        run: |
+          set -euo pipefail
+          docker push "${IMAGE}:${SHA_TAG}"
+          if [ -n "$MOVING_TAG" ]; then docker push "${IMAGE}:${MOVING_TAG}"; fi
+          echo "pushed ${IMAGE}:${SHA_TAG}${MOVING_TAG:+ + :$MOVING_TAG}"
