@@ -28,6 +28,17 @@ END $$;
 -- 3. Ownership of the `roko` schema → roko_indexer
 ALTER SCHEMA roko OWNER TO roko_indexer;
 
+-- 3b. The sidecar's own sqlx migrations run AS roko_indexer and need to:
+--       - CREATE SCHEMA roko (idempotent; needs CREATE on the database), and
+--       - create tables + _sqlx_migrations INSIDE roko (needs roko on the search_path).
+--     Without these the migrations fail with "permission denied for schema public"
+--     (Postgres 15+ makes public non-writable to non-owners) then "permission denied
+--     for database blockscout". roko_indexer still cannot touch Blockscout's own
+--     tables in `public` (step 5 revokes write there); CREATE on the database only
+--     lets it make NEW schemas, which for this dedicated role is acceptable.
+GRANT CREATE ON DATABASE blockscout TO roko_indexer;
+ALTER ROLE roko_indexer SET search_path = roko, public;
+
 -- 4. Read-only access for the existing blockscout role on the roko schema.
 GRANT USAGE ON SCHEMA roko TO blockscout;
 GRANT SELECT ON ALL TABLES IN SCHEMA roko TO blockscout;
