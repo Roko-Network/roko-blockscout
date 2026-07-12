@@ -120,6 +120,27 @@ docker compose up -d
 docker compose up -d
 ```
 
+### Updating the nginx config (important — recreate, don't just reload)
+
+`nginx/default.conf` is bind-mounted as a **single file**. Docker file-mounts pin
+the file's *inode*, so replacing the file (`scp`, `mv`, an editor that writes a
+temp then renames, or `git pull` writing a fresh file) leaves the container bound
+to the **old inode** — `nginx -s reload` then silently re-reads the *stale* config
+and reports success while none of your changes are live. After ANY change to
+`nginx/default.conf`, recreate the proxy so it re-binds the current file:
+
+```bash
+docker compose up -d --force-recreate proxy
+# verify the container sees the current file:
+[ "$(stat -c %i nginx/default.conf)" = \
+  "$(docker compose exec -T proxy stat -c %i /etc/nginx/conf.d/default.conf)" ] \
+  && echo "inode matches — config live" || echo "STALE — recreate proxy"
+```
+
+In-place edits that keep the inode (`cp new nginx/default.conf`, `sed -i`) are
+picked up by a plain `nginx -s reload`. The cleaner permanent fix is to bind-mount
+the `nginx/` **directory** instead of the single file (then reload suffices).
+
 ## Files
 
 | File | Purpose | Committed? |
