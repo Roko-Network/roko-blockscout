@@ -23,8 +23,8 @@ defmodule BlockScoutWeb.API.V2.TemporalControllerTest do
   describe "GET /api/v2/temporal/watermark" do
     test "returns watermark data on success", %{conn: conn, bypass: bypass} do
       watermark_result = %{
-        "block_number" => 42,
-        "timestamp_ns" => 1_711_234_567_000_000_000
+        "current_watermark" => 1_711_234_567_000_000_123,
+        "last_update_block" => 42
       }
 
       Bypass.expect_once(bypass, "POST", "/", fn conn ->
@@ -38,7 +38,10 @@ defmodule BlockScoutWeb.API.V2.TemporalControllerTest do
 
       response = get(conn, "/api/v2/temporal/watermark")
 
-      assert json_response(response, 200) == watermark_result
+      assert json_response(response, 200) == %{
+               "current_watermark" => "1711234567000000123",
+               "last_update_block" => 42
+             }
     end
 
     test "returns 502 when node returns JSON-RPC error", %{conn: conn, bypass: bypass} do
