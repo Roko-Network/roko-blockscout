@@ -27,7 +27,12 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
   @spec watermark(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def watermark(conn, _params) do
     case rpc_call("temporal_getWatermarkInfo", []) do
-      {:ok, result} -> json(conn, result)
+      {:ok, result} ->
+        # Nanosecond watermarks exceed JavaScript's safe integer range. Keep the
+        # value exact across the JSON boundary instead of letting browsers round it.
+        normalized = Map.update(result, "current_watermark", "0", &to_string/1)
+        json(conn, normalized)
+
       {:error, reason} -> conn |> put_status(502) |> json(%{error: reason})
     end
   end
