@@ -68,7 +68,7 @@ services:
 
   # HTTP-only front. TLS terminates upstream (npm01 (NPM) for explorer.roko.internal,
   # Cloudflare edge for explorer.roko.network via the cloudflared tunnel on oberth).
-  # Publishes 80 on roko-explorer's internal interface only (roko-explorer has no public IP).
+  # Publishes 80 on apps01's internal interface. TLS terminates upstream.
   proxy:
     depends_on:
       - backend
@@ -96,7 +96,10 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://roko_indexer:${ROKO_INDEXER_DB_PASSWORD:?ROKO_INDEXER_DB_PASSWORD must be set in deploy/.env}@db:5432/blockscout
-      ROKO_RPC_WS_URL: ${ROKO_RPC_WS_URL:-wss://roko-testnetv2.ntfork.com}
+      # subxt permits plaintext WebSockets only for loopback URLs. The
+      # roko-rpc-tunnel sidecar shares this network namespace and relays that
+      # loopback socket to boe's apps01-restricted RPC proxy.
+      ROKO_RPC_WS_URL: ${ROKO_RPC_WS_URL:-ws://127.0.0.1:9945}
       ROKO_RPC_FALLBACK_URL: ${ROKO_RPC_FALLBACK_URL:-}
       INDEXER_START_BLOCK: ${INDEXER_START_BLOCK:-0}
       METRICS_BIND: 0.0.0.0:9100
@@ -110,6 +113,19 @@ services:
       timeout: 5s
       retries: 3
 
+  roko-rpc-tunnel:
+    depends_on:
+      - roko-indexer
+    image: ${ROKO_RPC_TUNNEL_IMAGE:-alpine/socat:1.8.0.3}
+    container_name: roko-rpc-tunnel
+    restart: unless-stopped
+    network_mode: service:roko-indexer
+    command:
+      - TCP4-LISTEN:9945,bind=127.0.0.1,reuseaddr,fork
+      - TCP4:boe.s9.internal:9945
+
 volumes:
   redis-data:
+    name: ${ROKO_REDIS_VOLUME:-roko-blockscout-redis-v52370}
   postgres-data:
+    name: ${ROKO_POSTGRES_VOLUME:-roko-blockscout-postgres-v52370}

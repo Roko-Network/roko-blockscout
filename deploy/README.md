@@ -1,18 +1,33 @@
-# roko-explorer deployment scaffold
+# ROKO Blockscout deployment on apps01
 
 This directory holds the docker-compose stack for the ROKO Blockscout explorer.
 
-> **Ingress model (roko-explorer, two domains).** The stack now runs on **roko-explorer** (internal
-> `s9.internal` VM, no public IP) and serves **HTTP-only** on port 80, routing by
+> **Ingress model (apps01, two domains).** The stack runs on **apps01**
+> (`10.0.42.108`) and serves **HTTP-only** on port 80, routing by
 > `Host` to a per-domain frontend:
 > - `explorer.roko.internal` → `frontend-internal` — TLS terminated on **npm01** (NPM, internal CA).
-> - `explorer.roko.network` → `frontend-public` — TLS at the **Cloudflare edge** via a `cloudflared` tunnel on oberth/DMZ (roko-explorer keeps zero inbound ports).
+> - `explorer.roko.network` → `frontend-public` — TLS at the **Cloudflare edge** via a `cloudflared` tunnel on oberth/DMZ.
 >
 > The backend/DB/indexer are shared across both domains. There are **two frontend
 > containers** because the Blockscout frontend bakes a single `NEXT_PUBLIC_*_HOST`.
 > Edge (proxy + tunnel) config and requirements: see [`edge/README.md`](edge/README.md).
-> The legacy single-domain `roko-explorer.ntfork.com` + certbot/443 path below is
-> **superseded** — certbot is not used on roko-explorer (TLS terminates upstream).
+> The legacy `roko-explorer` VM and single-domain certbot/443 path are
+> **superseded** — certbot is not used on apps01 (TLS terminates upstream).
+
+## Active chain profile
+
+The active deployment is the mainnet-configured test chain on boe:
+
+- chain ID: `52370` (`0xcc92`);
+- backend RPC: `boe.s9.internal:9945`;
+- the native sidecar uses `ws://127.0.0.1:9945` through the colocated
+  `roko-rpc-tunnel` container because subxt permits plaintext WebSockets only
+  for loopback URLs;
+- boe keeps its validator RPC on loopback; a hardened `socat` proxy accepts
+  only apps01 (`10.0.42.108`) on the fleet network;
+- public and internal frontends use their own `/api/eth-rpc` endpoints;
+- chain cutovers use fresh named Postgres and Redis volumes. Prior volumes are
+  retained unchanged for rollback and are never pruned during cutover.
 
 ## Repos & layout
 
@@ -28,7 +43,7 @@ This `deploy/` directory lives **inside the backend repo**, but in production it
 
     ~/roko-blockscout/            # backend repo (contains this deploy/ dir)
     ~/roko-blockscout-frontend/   # frontend repo
-    /opt/roko-blockscout/           # copy of deploy/ + the (gitignored) .env secrets; run `docker compose` here
+    /opt/roko-blockscout/         # apps01 runtime copy + gitignored secrets
 
 ## Stack
 
@@ -38,6 +53,7 @@ This `deploy/` directory lives **inside the backend repo**, but in production it
 - `frontend` — `roko-blockscout-frontend:local` (built from the `roko-blockscout-frontend` repo)
 - `proxy` — nginx with letsencrypt cert mount + faucet proxy to roko-admin
 - `roko-indexer` — `ghcr.io/roko-network/roko-indexer:testnet-latest-amd64` (substrate-native indexer; writes the `roko.*` schema for `SubstrateController`)
+- `roko-rpc-tunnel` — loopback-only WebSocket relay from the indexer network namespace to boe's apps01-restricted proxy
 
 ## Building the images
 
@@ -86,11 +102,13 @@ sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$POSTGRES_PASS|" .env
 sed -i "s|^ROKO_INDEXER_DB_PASSWORD=.*|ROKO_INDEXER_DB_PASSWORD=$INDEXER_PASS|" .env
 sed -i "s|replace-with-strong-secret|$POSTGRES_PASS|g" envs/backend.env
 
-# 4. Obtain certs via certbot (one-time, requires DNS already pointing here)
-sudo certbot certonly --webroot -w ./certbot-webroot -d roko-explorer.ntfork.com
+# 4. Confirm TLS termination and Host preservation at npm01/Cloudflare.
 
-# 5. Bring postgres + redis up first
+# 5. Bring postgres + redis up first using the chain-specific named volumes.
 docker compose up -d db redis-db
+
+# If the RPC source is pruned rather than archival, set INDEXER_START_BLOCK in
+# .env to the finalized head recorded at cutover. Do not use 0 for a pruned node.
 
 # 6. One-shot: create the `roko` schema + `roko_indexer` role, grant USAGE/SELECT
 #    to blockscout. Replace CHANGEME with the value of $INDEXER_PASS.
@@ -152,9 +170,20 @@ the `nginx/` **directory** instead of the single file (then reload suffices).
 | `.env`, `envs/backend.env`, `envs/frontend.env` | Actual secrets — local-only | **No** (gitignored) |
 | `logs/`, `dets/`, `certbot-webroot/` | Runtime artifacts | **No** (gitignored) |
 
+## Chain cutover and rollback
+
+Never point a database containing another genesis at a new chain. Set
+`ROKO_POSTGRES_VOLUME` and `ROKO_REDIS_VOLUME` to new chain-specific names,
+initialize the new database, and retain the previous named volumes. Rollback is
+the inverse operation: restore the prior non-secret RPC/network settings and
+volume names, then recreate the stack. Do not run `docker compose down -v` or
+`docker volume prune` during a cutover or observation window.
+
 ## Secret rotation
 
-Rotate `POSTGRES_PASSWORD` and `ROKO_INDEXER_DB_PASSWORD` on every fresh deploy.
+Generate new `POSTGRES_PASSWORD` and `ROKO_INDEXER_DB_PASSWORD` for a genuinely
+fresh deployment. A chain-only cutover does not authorize deleting or rotating
+existing host credentials; preserve them until a separately verified retirement.
 
 - `POSTGRES_PASSWORD` must match in `.env` and `envs/backend.env`'s `DATABASE_URL`. Mismatch → backend cannot connect to the DB.
 - `ROKO_INDEXER_DB_PASSWORD` must match in `.env` AND the `roko_indexer` Postgres role (set during init via `init-roko-schema.sql`, or rotated via `ALTER ROLE roko_indexer WITH PASSWORD '...'`). Mismatch → sidecar can't connect; `/api/v2/substrate/*` returns empty results because no new rows are landing.
