@@ -23,7 +23,7 @@ defmodule Explorer.Chain.RokoExtrinsic do
     field(:signer, :binary)
     field(:signature, :binary)
     field(:tip, :decimal)
-    field(:era, :map)
+    field(:era, Explorer.Chain.JSONBValue)
     field(:nonce, :integer)
     field(:fee_paid, :decimal)
     field(:success, :boolean)
