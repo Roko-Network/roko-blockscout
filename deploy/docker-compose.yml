@@ -91,7 +91,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    image: ${ROKO_INDEXER_IMAGE:-ghcr.io/roko-network/roko-indexer:testnet-latest-amd64}
+    image: ${ROKO_INDEXER_IMAGE:-git.integrolabs.net/roko/roko-indexer:testnet}
     container_name: roko-indexer
     restart: unless-stopped
     environment:

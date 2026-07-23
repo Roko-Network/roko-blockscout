@@ -31,13 +31,14 @@ The active deployment is the mainnet-configured test chain on boe:
 
 ## Repos & layout
 
-The explorer is a Blockscout fork split across three repos (all under the `Roko-Network` GitHub org). The two `:local` images are built from source on the host; the sidecar is pulled from GHCR:
+The explorer is a Blockscout fork split across three repos. Production images
+are built by CI and pulled from the internal Gitea registry:
 
 | Component | Repo | Image |
 |-----------|------|-------|
-| Backend (Elixir/Phoenix) | `Roko-Network/roko-blockscout` (`master`) | `roko-blockscout-backend:local` (build from source) |
-| Frontend (Next.js) | `Roko-Network/roko-blockscout-frontend` (`main`) | `roko-blockscout-frontend:local` (build from source) |
-| Indexer sidecar (Rust) | `roko_network/sidecar/` | `ghcr.io/roko-network/roko-indexer:testnet-latest-amd64` (pulled) |
+| Backend (Elixir/Phoenix) | `roko/roko-blockscout` (`master`) | `git.integrolabs.net/roko/roko-blockscout-backend:testnet` |
+| Frontend (Next.js) | `roko/roko-blockscout-frontend` (`main`) | `git.integrolabs.net/roko/roko-blockscout-frontend:testnet` |
+| Indexer sidecar (Rust) | `roko/roko_network` (`main`, `sidecar/`) | `git.integrolabs.net/roko/roko-indexer:testnet` |
 
 This `deploy/` directory lives **inside the backend repo**, but in production it is copied to its own run directory (e.g. `/opt/roko-blockscout/`) separate from the source checkouts. The build commands below run from each repo's own root, independent of where the compose stack runs. A typical host layout:
 
@@ -52,7 +53,7 @@ This `deploy/` directory lives **inside the backend repo**, but in production it
 - `backend` — `roko-blockscout-backend:local` (built from the `roko-blockscout` repo — see "Building the images")
 - `frontend` — `roko-blockscout-frontend:local` (built from the `roko-blockscout-frontend` repo)
 - `proxy` — nginx with letsencrypt cert mount + faucet proxy to roko-admin
-- `roko-indexer` — `ghcr.io/roko-network/roko-indexer:testnet-latest-amd64` (substrate-native indexer; writes the `roko.*` schema for `SubstrateController`)
+- `roko-indexer` — `git.integrolabs.net/roko/roko-indexer:testnet` (substrate-native indexer; writes the `roko.*` schema for `SubstrateController`)
 - `roko-rpc-tunnel` — loopback-only WebSocket relay from the indexer network namespace to boe's apps01-restricted proxy
 
 ## Building the images
@@ -193,10 +194,23 @@ existing host credentials; preserve them until a separately verified retirement.
 ```bash
 # Pull the new image
 docker compose pull roko-indexer
-docker compose up -d roko-indexer
+
+# The RPC tunnel shares roko-indexer's network namespace. Stop both, recreate
+# the indexer first, then recreate the tunnel against the new container ID.
+docker compose stop roko-rpc-tunnel roko-indexer
+docker compose up -d --no-deps --force-recreate roko-indexer
+docker compose up -d --no-deps --force-recreate roko-rpc-tunnel
 
 # Or pin to a specific version via .env:
-#   ROKO_INDEXER_IMAGE=ghcr.io/roko-network/roko-indexer:testnet-v0.1.0-amd64
+#   ROKO_INDEXER_IMAGE=git.integrolabs.net/roko/roko-indexer:sha-<commit>
+
+# Verify the tunnel shares the current indexer namespace.
+indexer_id="$(docker inspect roko-indexer --format '{{.Id}}')"
+tunnel_network="$(docker inspect roko-rpc-tunnel --format '{{.HostConfig.NetworkMode}}')"
+test "$tunnel_network" = "container:$indexer_id"
+
+# An HTTP response (including 4xx) proves the loopback RPC socket is reachable.
+docker exec roko-indexer wget -S -O /dev/null http://127.0.0.1:9945
 
 # Tail the indexer
 docker compose logs -f roko-indexer
