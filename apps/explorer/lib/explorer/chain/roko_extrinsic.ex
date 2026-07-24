@@ -76,6 +76,28 @@ defmodule Explorer.Chain.RokoExtrinsic do
     )
   end
 
+  @doc "Count all extrinsics in one exact transaction class."
+  def count_by_class_query(extrinsic_class) when is_binary(extrinsic_class) do
+    from(e in __MODULE__,
+      where: e.extrinsic_class == ^extrinsic_class,
+      select: count(e.id)
+    )
+  end
+
+  @doc "Count signed native user transactions, excluding EVM wrapper extrinsics."
+  def count_native_signed_query do
+    signed_class = "Signed"
+    ethereum_pallet = "Ethereum"
+    transact_method = "transact"
+
+    from(e in __MODULE__,
+      where:
+        e.extrinsic_class == ^signed_class and
+          not (e.pallet == ^ethereum_pallet and e.method == ^transact_method),
+      select: count(e.id)
+    )
+  end
+
   @doc """
   Recent feed, optionally filtered by class, pallet, and method and paginated
   via a `(block_number, index_in_block)` cursor. Pass the `next_page_params`
