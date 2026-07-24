@@ -454,6 +454,12 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
     total_extrinsics =
       Repo.one(from(e in RokoExtrinsic, select: count(e.id))) || 0
 
+    total_signed_extrinsics =
+      Repo.one(RokoExtrinsic.count_by_class_query("Signed")) || 0
+
+    total_native_signed_extrinsics =
+      Repo.one(RokoExtrinsic.count_native_signed_query()) || 0
+
     signed_24h =
       Repo.one(
         from(e in RokoExtrinsic,
@@ -510,6 +516,8 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
     json(conn, %{
       latest_block: latest_block,
       total_extrinsics: total_extrinsics,
+      total_signed_extrinsics: total_signed_extrinsics,
+      total_native_signed_extrinsics: total_native_signed_extrinsics,
       signed_extrinsics_24h: signed_24h,
       inherent_extrinsics_24h: inherent_24h,
       unsigned_extrinsics_24h: unsigned_24h,

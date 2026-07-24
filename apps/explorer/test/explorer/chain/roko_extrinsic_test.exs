@@ -35,4 +35,32 @@ defmodule Explorer.Chain.RokoExtrinsicTest do
       assert query.limit.params == [{10, :integer}]
     end
   end
+
+  describe "count_by_class_query/1" do
+    test "counts only the requested exact transaction class" do
+      query = RokoExtrinsic.count_by_class_query("Signed")
+
+      params =
+        query.wheres
+        |> Enum.flat_map(& &1.params)
+        |> Enum.map(&elem(&1, 0))
+
+      assert params == ["Signed"]
+      assert match?({:count, _, [_]}, query.select.expr)
+    end
+
+    test "counts native signed transactions without EVM wrappers" do
+      query = RokoExtrinsic.count_native_signed_query()
+
+      params =
+        query.wheres
+        |> Enum.flat_map(& &1.params)
+        |> Enum.map(&elem(&1, 0))
+
+      assert "Signed" in params
+      assert "Ethereum" in params
+      assert "transact" in params
+      assert match?({:count, _, [_]}, query.select.expr)
+    end
+  end
 end
