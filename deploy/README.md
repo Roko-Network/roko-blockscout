@@ -20,6 +20,8 @@ The active deployment is the mainnet-configured test chain on boe:
 
 - chain ID: `52370` (`0xcc92`);
 - backend RPC: `boe.s9.internal:9945`;
+- Docker host mapping: `ROKO_RPC_HOST_IP=10.0.42.97` (update from CMDB when
+  boe's address changes);
 - the native sidecar uses `ws://127.0.0.1:9945` through the colocated
   `roko-rpc-tunnel` container because subxt permits plaintext WebSockets only
   for loopback URLs;
