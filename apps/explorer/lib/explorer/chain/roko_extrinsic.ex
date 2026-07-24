@@ -77,12 +77,13 @@ defmodule Explorer.Chain.RokoExtrinsic do
   end
 
   @doc """
-  Recent feed, optionally filtered by (pallet, method) and paginated via a
-  `(block_number, index_in_block)` cursor. Pass the `next_page_params` from
-  the previous response back as `:before_block` + `:before_index` to scroll
-  backwards through the feed.
+  Recent feed, optionally filtered by class, pallet, and method and paginated
+  via a `(block_number, index_in_block)` cursor. Pass the `next_page_params`
+  from the previous response back as `:before_block` + `:before_index` to
+  scroll backwards through the feed.
   """
   def recent_query(opts \\ []) do
+    extrinsic_class = Keyword.get(opts, :extrinsic_class)
     pallet = Keyword.get(opts, :pallet)
     method = Keyword.get(opts, :method)
     limit = Keyword.get(opts, :limit, 50)
@@ -94,6 +95,11 @@ defmodule Explorer.Chain.RokoExtrinsic do
         order_by: [desc: e.block_number, desc: e.index_in_block],
         limit: ^limit
       )
+
+    base =
+      if extrinsic_class,
+        do: from(e in base, where: e.extrinsic_class == ^extrinsic_class),
+        else: base
 
     base = if pallet, do: from(e in base, where: e.pallet == ^pallet), else: base
     base = if method, do: from(e in base, where: e.method == ^method), else: base

@@ -45,6 +45,8 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
 
   alias BlockScoutWeb.Substrate.StorageKey
 
+  @extrinsic_classes ~w(Signed Inherent Unsigned)
+
   @doc "List active validators."
   @spec validators(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def validators(conn, _params) do
@@ -199,6 +201,7 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
         RokoPwrokoTransfer.by_event_kind_query(kind, limit)
       else
         import Ecto.Query
+
         from(t in RokoPwrokoTransfer,
           order_by: [desc: t.block_number, desc: t.id],
           limit: ^limit
@@ -348,40 +351,50 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
   end
 
   @doc """
-  Recent extrinsics feed, optionally filtered by pallet/method, with
-  Blockscout-style cursor pagination via `(block_number, index_in_block)`.
+  Recent extrinsics feed, optionally filtered by extrinsic class,
+  pallet/method, with Blockscout-style cursor pagination via
+  `(block_number, index_in_block)`.
 
   Pass `next_page_params` from the previous response back as
   `?block_number=…&index_in_block=…` to get the next page.
   """
   @spec extrinsics_recent(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def extrinsics_recent(conn, params) do
-    limit = parse_limit(params["limit"], 50, 500)
-    before_block = parse_optional_int(params["block_number"])
-    before_index = parse_optional_int(params["index_in_block"])
+    case parse_extrinsic_class(params["extrinsic_class"]) do
+      {:ok, extrinsic_class} ->
+        limit = parse_limit(params["limit"], 50, 500)
+        before_block = parse_optional_int(params["block_number"])
+        before_index = parse_optional_int(params["index_in_block"])
 
-    opts =
-      []
-      |> maybe_put(:pallet, params["pallet"])
-      |> maybe_put(:method, params["method"])
-      |> maybe_put(:before_block, before_block)
-      |> maybe_put(:before_index, before_index)
-      |> Keyword.put(:limit, limit)
+        opts =
+          []
+          |> maybe_put(:extrinsic_class, extrinsic_class)
+          |> maybe_put(:pallet, params["pallet"])
+          |> maybe_put(:method, params["method"])
+          |> maybe_put(:before_block, before_block)
+          |> maybe_put(:before_index, before_index)
+          |> Keyword.put(:limit, limit)
 
-    items =
-      RokoExtrinsic.recent_query(opts)
-      |> Repo.all()
-      |> Enum.map(&serialize_extrinsic/1)
+        items =
+          RokoExtrinsic.recent_query(opts)
+          |> Repo.all()
+          |> Enum.map(&serialize_extrinsic/1)
 
-    next_page_params =
-      if length(items) >= limit do
-        last = List.last(items)
-        %{block_number: last.block_number, index_in_block: last.index_in_block}
-      else
-        nil
-      end
+        next_page_params =
+          if length(items) >= limit do
+            last = List.last(items)
+            %{block_number: last.block_number, index_in_block: last.index_in_block}
+          else
+            nil
+          end
 
-    json(conn, %{items: items, next_page_params: next_page_params})
+        json(conn, %{items: items, next_page_params: next_page_params})
+
+      :error ->
+        conn
+        |> put_status(400)
+        |> json(%{error: "invalid extrinsic_class; expected Signed, Inherent, or Unsigned"})
+    end
   end
 
   @doc """
@@ -431,9 +444,7 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
     # Latest known block number (max of indexed extrinsics — equivalent to
     # the sidecar cursor for our purposes).
     latest_block =
-      Repo.one(
-        from(e in RokoExtrinsic, select: max(e.block_number))
-      ) || 0
+      Repo.one(from(e in RokoExtrinsic, select: max(e.block_number))) || 0
 
     # 24h window assuming testnet 2s blocks: 43200 blocks/day.
     # For mainnet (3s blocks) this overshoots slightly — close enough for
@@ -476,6 +487,7 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
       ) || 0
 
     blocks_24h = max(latest_block - window_start, 1)
+
     avg_ext_per_block =
       Float.round((signed_24h + inherent_24h + unsigned_24h) / blocks_24h, 2)
 
@@ -792,7 +804,10 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
           Jason.encode!(%{
             "jsonrpc" => "2.0",
             "id" => nil,
-            "error" => %{"code" => -32000, "message" => "upstream unreachable: #{inspect(reason)}"}
+            "error" => %{
+              "code" => -32000,
+              "message" => "upstream unreachable: #{inspect(reason)}"
+            }
           })
 
         conn
@@ -856,4 +871,12 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
 
   defp parse_optional_int(n) when is_integer(n) and n >= 0, do: n
   defp parse_optional_int(_), do: nil
+
+  defp parse_extrinsic_class(nil), do: {:ok, nil}
+  defp parse_extrinsic_class(""), do: {:ok, nil}
+
+  defp parse_extrinsic_class(value) when value in @extrinsic_classes,
+    do: {:ok, value}
+
+  defp parse_extrinsic_class(_), do: :error
 end
