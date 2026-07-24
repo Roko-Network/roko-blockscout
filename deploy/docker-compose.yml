@@ -94,6 +94,11 @@ services:
     image: ${ROKO_INDEXER_IMAGE:-git.integrolabs.net/roko/roko-indexer:testnet}
     container_name: roko-indexer
     restart: unless-stopped
+    # Docker's embedded resolver does not inherit the apps01 host's private
+    # search domains. Pin the CMDB-managed boe address while retaining the
+    # stable service name used by the relay.
+    extra_hosts:
+      - "boe.s9.internal:${ROKO_RPC_HOST_IP:-10.0.42.97}"
     environment:
       DATABASE_URL: postgres://roko_indexer:${ROKO_INDEXER_DB_PASSWORD:?ROKO_INDEXER_DB_PASSWORD must be set in deploy/.env}@db:5432/blockscout
       # subxt permits plaintext WebSockets only for loopback URLs. The
