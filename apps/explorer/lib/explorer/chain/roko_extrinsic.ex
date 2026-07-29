@@ -10,6 +10,8 @@ defmodule Explorer.Chain.RokoExtrinsic do
 
   import Ecto.Query
 
+  alias Explorer.Chain.Block
+
   @primary_key {:id, :id, autogenerate: true}
   @schema_prefix "roko"
   schema "extrinsics" do
@@ -32,6 +34,7 @@ defmodule Explorer.Chain.RokoExtrinsic do
     field(:call_hash, :binary)
     field(:extrinsic_class, :string)
     field(:recorded_at, :utc_datetime_usec)
+    field(:block_timestamp, :utc_datetime_usec, virtual: true)
   end
 
   @doc "All extrinsics in a given block, ordered by their in-block index."
@@ -40,6 +43,7 @@ defmodule Explorer.Chain.RokoExtrinsic do
       where: e.block_number == ^block_number,
       order_by: [asc: e.index_in_block]
     )
+    |> with_block_timestamp()
   end
 
   @doc "Extrinsics signed by an account, newest first."
@@ -49,6 +53,7 @@ defmodule Explorer.Chain.RokoExtrinsic do
       order_by: [desc: e.block_number, desc: e.index_in_block],
       limit: ^limit
     )
+    |> with_block_timestamp()
   end
 
   @doc """
@@ -62,6 +67,7 @@ defmodule Explorer.Chain.RokoExtrinsic do
       where: e.hash == ^hash_bytes or e.call_hash == ^hash_bytes,
       limit: 1
     )
+    |> with_block_timestamp()
   end
 
   @doc """
@@ -117,6 +123,7 @@ defmodule Explorer.Chain.RokoExtrinsic do
         order_by: [desc: e.block_number, desc: e.index_in_block],
         limit: ^limit
       )
+      |> with_block_timestamp()
 
     base =
       if extrinsic_class,
@@ -135,5 +142,13 @@ defmodule Explorer.Chain.RokoExtrinsic do
     else
       base
     end
+  end
+
+  defp with_block_timestamp(query) do
+    from(e in query,
+      left_join: b in Block,
+      on: b.number == e.block_number and b.consensus == true,
+      select_merge: %{block_timestamp: b.timestamp}
+    )
   end
 end

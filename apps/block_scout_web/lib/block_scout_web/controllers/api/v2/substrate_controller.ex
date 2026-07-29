@@ -644,7 +644,8 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
       error: e.error,
       hash: hex(e.hash),
       call_hash: hex(e.call_hash),
-      extrinsic_class: e.extrinsic_class
+      extrinsic_class: e.extrinsic_class,
+      block_timestamp: e.block_timestamp
     }
   end
 

@@ -33,6 +33,8 @@ defmodule Explorer.Chain.RokoExtrinsicTest do
 
       assert query.wheres == []
       assert query.limit.params == [{10, :integer}]
+      assert length(query.joins) == 1
+      assert query.select.expr != nil
     end
   end
 
