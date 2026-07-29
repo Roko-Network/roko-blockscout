@@ -498,8 +498,9 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
       # IMPORTANT: batch-timestamps must be declared BEFORE the dynamic
       # :transaction_hash_param route, otherwise Phoenix matches the literal
       # string "batch-timestamps" against :transaction_hash_param and the batch
-      # action becomes unreachable. POST (not GET) because the JSON body of
-      # hashes is unportable over GET in many HTTP clients.
+      # action becomes unreachable. GET supports browser-safe list reads while
+      # POST remains available for clients that prefer a JSON body.
+      get("/transactions/batch-timestamps", V2.TemporalController, :batch_transaction_timestamps)
       post("/transactions/batch-timestamps", V2.TemporalController, :batch_transaction_timestamps)
       get("/transactions/:transaction_hash_param/timestamp", V2.TemporalController, :transaction_timestamp)
       get("/blocks/:block_number_param/metadata", V2.TemporalController, :block_metadata)

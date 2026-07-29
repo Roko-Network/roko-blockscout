@@ -226,7 +226,7 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
                 end
             end
 
-          {tx_hash, %{timestamp_ns: timestamp_ns}}
+          {tx_hash, %{timestamp_ns: normalize_timestamp_ns(timestamp_ns)}}
         end,
         max_concurrency: 10,
         timeout: 15_000,
@@ -241,6 +241,9 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
 
     json(conn, %{timestamps: results})
   end
+
+  defp normalize_timestamp_ns(nil), do: nil
+  defp normalize_timestamp_ns(timestamp_ns), do: to_string(timestamp_ns)
 
   @doc """
   Returns the temporal metadata for a specific block number.

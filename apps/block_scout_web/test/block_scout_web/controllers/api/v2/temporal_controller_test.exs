@@ -209,4 +209,30 @@ defmodule BlockScoutWeb.API.V2.TemporalControllerTest do
       get(conn, "/api/v2/temporal/transactions/#{tx_hash}/timestamp")
     end
   end
+
+  describe "GET /api/v2/temporal/transactions/batch-timestamps" do
+    test "returns full-precision timestamps as strings", %{conn: conn, bypass: bypass} do
+      tx_hash = "0x" <> String.duplicate("12", 32)
+      timestamp_ns = 1_711_234_567_123_456_789
+
+      Bypass.expect_once(bypass, "POST", "/", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+        assert {:ok, %{"method" => @transaction_timestamp_method, "params" => [^tx_hash]}} =
+                 Jason.decode(body)
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "result" => timestamp_ns}))
+      end)
+
+      response = get(conn, "/api/v2/temporal/transactions/batch-timestamps?hashes=#{tx_hash}")
+
+      assert json_response(response, 200) == %{
+               "timestamps" => %{
+                 tx_hash => %{"timestamp_ns" => "1711234567123456789"}
+               }
+             }
+    end
+  end
 end
