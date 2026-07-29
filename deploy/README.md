@@ -141,6 +141,37 @@ docker compose up -d
 docker compose up -d
 ```
 
+### Updating token artwork without rebuilding the frontend
+
+Token artwork and `token-list.json` are served from the persistent
+`deploy/token-icons/` directory mounted read-only into the nginx proxy. They
+are intentionally independent of the frontend image.
+
+Prepare a directory containing the complete token list and every image it
+references, validate it, then publish it:
+
+```bash
+deploy/publish-token-assets.sh \
+  --source /path/to/token-icons
+
+deploy/publish-token-assets.sh \
+  --source /path/to/token-icons \
+  --execute
+```
+
+The publisher accepts JPEG, PNG, SVG, and WebP artwork; requires all entries to
+target ROKO chain ID `52370`; retains the previous files under
+`token-icons/history/`; publishes the manifest last; requests an immediate
+Blockscout metadata refresh; and verifies public checksums. It does not rebuild
+or restart the frontend or backend.
+
+Use a new, content-versioned filename when replacing an existing image, then
+update its `logoURI` in the manifest. The explorer's Cloudflare policy may cache
+an already-used public asset URL for up to four hours; a new filename becomes
+visible immediately. The backend reads the manifest directly from the local
+proxy at `http://proxy/assets/token-icons/token-list.json`, bypassing that edge
+cache.
+
 ### Updating the nginx config (important — recreate, don't just reload)
 
 `nginx/default.conf` is bind-mounted as a **single file**. Docker file-mounts pin
