@@ -51,7 +51,13 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
         converged = result["convergenceState"] == "Converged"
         peer_count = result["peerCount"] || 0
         BlockScoutWeb.TemporalQualitySampler.record_sample(quality, converged, peer_count, 0)
-        json(conn, result)
+
+        normalized =
+          result
+          |> normalize_ns_field("consensusTimeNs")
+          |> normalize_ns_field("consensusOffsetNs")
+
+        json(conn, normalized)
 
       {:error, reason} ->
         conn |> put_status(502) |> json(%{error: reason})
@@ -66,7 +72,12 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
   @spec queue_stats(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def queue_stats(conn, _params) do
     case rpc_call("temporal_getQueueStats", []) do
-      {:ok, result} -> json(conn, result)
+      {:ok, result} ->
+        normalized =
+          Enum.reduce(["avgWaitNs", "p50WaitNs", "p95WaitNs", "maxWaitNs"], result, &normalize_ns_field(&2, &1))
+
+        json(conn, normalized)
+
       {:error, reason} -> conn |> put_status(502) |> json(%{error: reason})
     end
   end
@@ -98,9 +109,9 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
 
     json(conn, %{
       hash: tx_hash,
-      timestamp_ns: timestamp_ns,
-      wait_ns: wait_info["waitNs"],
-      arrival_ns: wait_info["arrivalNs"],
+      timestamp_ns: normalize_timestamp_ns(timestamp_ns),
+      wait_ns: normalize_timestamp_ns(wait_info["waitNs"]),
+      arrival_ns: normalize_timestamp_ns(wait_info["arrivalNs"]),
       priority: wait_info["priority"],
       queue_position: wait_info["queuePosition"]
     })
@@ -243,7 +254,18 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
   end
 
   defp normalize_timestamp_ns(nil), do: nil
+
+  defp normalize_timestamp_ns(timestamp_ns) when is_map(timestamp_ns) do
+    normalize_timestamp_ns(timestamp_ns["timestamp_ns"] || timestamp_ns["timestampNs"])
+  end
+
   defp normalize_timestamp_ns(timestamp_ns), do: to_string(timestamp_ns)
+
+  defp normalize_ns_field(result, field) when is_map(result) do
+    Map.update(result, field, nil, &normalize_timestamp_ns/1)
+  end
+
+  defp normalize_ns_field(result, _field), do: result
 
   @doc """
   Returns the temporal metadata for a specific block number.
@@ -256,7 +278,7 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
     case Integer.parse(block_number_str) do
       {block_number, _} ->
         case rpc_call("temporal_getBlockMetadata", [block_number]) do
-          {:ok, result} -> json(conn, result)
+          {:ok, result} -> json(conn, normalize_block_metadata(result, block_number))
           {:error, reason} -> conn |> put_status(502) |> json(%{error: reason})
         end
 
@@ -264,6 +286,71 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
         conn |> put_status(400) |> json(%{error: "invalid block number"})
     end
   end
+
+  @doc """
+  Returns nanosecond-precision temporal metadata for a batch of block numbers.
+
+  Accepts `numbers=1,2,3` or a JSON body with `{"numbers": [1, 2, 3]}` (max
+  100 per call). Nanosecond values are encoded as strings so JavaScript clients
+  never lose precision while parsing the response.
+  """
+  @spec batch_block_metadata(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def batch_block_metadata(conn, params) do
+    numbers =
+      case params do
+        %{"numbers" => values} when is_list(values) -> values
+        %{"numbers" => values} when is_binary(values) -> String.split(values, ",", trim: true)
+        _ -> []
+      end
+      |> Enum.map(&parse_block_number/1)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+      |> Enum.take(100)
+
+    results =
+      numbers
+      |> Task.async_stream(
+        fn block_number ->
+          case rpc_call("temporal_getBlockMetadata", [block_number]) do
+            {:ok, result} -> {block_number, normalize_block_metadata(result, block_number)}
+            {:error, reason} -> {block_number, %{error: inspect(reason)}}
+          end
+        end,
+        max_concurrency: 10,
+        timeout: 15_000,
+        on_timeout: :kill_task
+      )
+      |> Enum.zip(numbers)
+      |> Enum.reduce(%{}, fn
+        {{:ok, {block_number, data}}, _number_in}, acc -> Map.put(acc, to_string(block_number), data)
+        {{:exit, :timeout}, number_in}, acc -> Map.put(acc, to_string(number_in), %{error: "timeout"})
+        {_, number_in}, acc -> Map.put(acc, to_string(number_in), %{error: "rpc_failure"})
+      end)
+
+    json(conn, %{blocks: results})
+  end
+
+  defp parse_block_number(value) when is_integer(value) and value >= 0, do: value
+
+  defp parse_block_number(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {number, ""} when number >= 0 -> number
+      _ -> nil
+    end
+  end
+
+  defp parse_block_number(_value), do: nil
+
+  defp normalize_block_metadata(result, block_number) when is_map(result) do
+    result
+    |> Map.put_new("block_number", block_number)
+    |> Map.update("block_nano_timestamp", nil, fn
+      nil -> nil
+      timestamp_ns -> to_string(timestamp_ns)
+    end)
+  end
+
+  defp normalize_block_metadata(_result, block_number), do: %{"block_number" => block_number}
 
   @doc """
   Returns time quality history for chart display.
@@ -342,7 +429,12 @@ defmodule BlockScoutWeb.API.V2.TemporalController do
     case Integer.parse(block_number_str) do
       {block_number, _} ->
         case rpc_call("temporal_getBlockTransactionTimestamps", [block_number]) do
-          {:ok, result} -> json(conn, result)
+          {:ok, result} when is_list(result) ->
+            normalized = Enum.map(result, &normalize_ns_field(&1, "timestampNs"))
+            json(conn, normalized)
+
+          {:ok, result} ->
+            json(conn, result)
           {:error, reason} -> conn |> put_status(502) |> json(%{error: reason})
         end
 

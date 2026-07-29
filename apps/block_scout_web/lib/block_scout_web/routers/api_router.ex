@@ -503,6 +503,8 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
       get("/transactions/batch-timestamps", V2.TemporalController, :batch_transaction_timestamps)
       post("/transactions/batch-timestamps", V2.TemporalController, :batch_transaction_timestamps)
       get("/transactions/:transaction_hash_param/timestamp", V2.TemporalController, :transaction_timestamp)
+      get("/blocks/batch-metadata", V2.TemporalController, :batch_block_metadata)
+      post("/blocks/batch-metadata", V2.TemporalController, :batch_block_metadata)
       get("/blocks/:block_number_param/metadata", V2.TemporalController, :block_metadata)
       get("/blocks/:block_number_param/timestamps", V2.TemporalController, :block_transaction_timestamps)
     end

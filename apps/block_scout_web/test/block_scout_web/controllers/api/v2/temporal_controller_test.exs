@@ -5,6 +5,7 @@ defmodule BlockScoutWeb.API.V2.TemporalControllerTest do
   @consensus_time_method "temporal_getConsensusTime"
   @queue_stats_method "temporal_getQueueStats"
   @transaction_timestamp_method "temporal_getTransactionTimestamp"
+  @block_metadata_method "temporal_getBlockMetadata"
 
   setup do
     bypass = Bypass.open()
@@ -172,7 +173,14 @@ defmodule BlockScoutWeb.API.V2.TemporalControllerTest do
 
       response = get(conn, "/api/v2/temporal/transactions/#{tx_hash}/timestamp")
 
-      assert json_response(response, 200) == timestamp_result
+      assert json_response(response, 200) == %{
+               "arrival_ns" => nil,
+               "hash" => tx_hash,
+               "priority" => nil,
+               "queue_position" => nil,
+               "timestamp_ns" => "1711234567123456789",
+               "wait_ns" => nil
+             }
     end
 
     test "returns 502 when node returns JSON-RPC error for unknown tx", %{conn: conn, bypass: bypass} do
@@ -231,6 +239,43 @@ defmodule BlockScoutWeb.API.V2.TemporalControllerTest do
       assert json_response(response, 200) == %{
                "timestamps" => %{
                  tx_hash => %{"timestamp_ns" => "1711234567123456789"}
+               }
+             }
+    end
+  end
+
+  describe "GET /api/v2/temporal/blocks/batch-metadata" do
+    test "returns full-precision block timestamps as strings", %{conn: conn, bypass: bypass} do
+      block_number = 42
+      timestamp_ns = 1_711_234_567_123_456_789
+
+      Bypass.expect_once(bypass, "POST", "/", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+        assert {:ok, %{"method" => @block_metadata_method, "params" => [^block_number]}} =
+                 Jason.decode(body)
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(
+          200,
+          Jason.encode!(%{
+            "jsonrpc" => "2.0",
+            "id" => 1,
+            "result" => %{"block_nano_timestamp" => timestamp_ns, "miner_key_id" => 3}
+          })
+        )
+      end)
+
+      response = get(conn, "/api/v2/temporal/blocks/batch-metadata?numbers=#{block_number}")
+
+      assert json_response(response, 200) == %{
+               "blocks" => %{
+                 "42" => %{
+                   "block_nano_timestamp" => "1711234567123456789",
+                   "block_number" => 42,
+                   "miner_key_id" => 3
+                 }
                }
              }
     end
