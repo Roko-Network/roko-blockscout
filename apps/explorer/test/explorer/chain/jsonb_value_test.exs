@@ -35,6 +35,13 @@ defmodule Explorer.Chain.JSONBValueTest do
                Ecto.embedded_load(RokoExtrinsic, %{"era" => era}, :json)
     end
 
+    test "RokoExtrinsic schema loads array-shaped call arguments" do
+      args = []
+
+      assert %RokoExtrinsic{args: ^args} =
+               Ecto.embedded_load(RokoExtrinsic, %{"args" => args}, :json)
+    end
+
     test "RokoExtrinsic schema leaves a nullable era unset" do
       assert %RokoExtrinsic{era: nil} =
                Ecto.embedded_load(RokoExtrinsic, %{"era" => nil}, :json)

@@ -20,7 +20,7 @@ defmodule Explorer.Chain.RokoExtrinsic do
     field(:index_in_block, :integer)
     field(:pallet, :string)
     field(:method, :string)
-    field(:args, :map)
+    field(:args, Explorer.Chain.JSONBValue)
     field(:args_truncated, :boolean)
     field(:signer, :binary)
     field(:signature, :binary)
