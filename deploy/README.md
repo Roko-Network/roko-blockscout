@@ -282,7 +282,7 @@ returns zero. The general `/api/v2/substrate/stats` endpoint retains its full
 analytics response for other consumers.
 
 The sidecar owns `idx_extrinsics_signed_count` through migration
-`0014_native_transaction_count_index.sql` in roko_network. The API uses a fixed
+`0015_native_transaction_count_index.sql` in roko_network. The API uses a fixed
 Signed SQL predicate so generic prepared plans can use this small partial index.
 For an existing large database, operators can create the same index concurrently
 before deploying the API; verify `indisvalid` and a representative prepared query
