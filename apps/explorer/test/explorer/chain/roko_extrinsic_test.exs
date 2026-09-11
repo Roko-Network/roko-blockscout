@@ -59,7 +59,7 @@ defmodule Explorer.Chain.RokoExtrinsicTest do
         |> Enum.flat_map(& &1.params)
         |> Enum.map(&elem(&1, 0))
 
-      assert "Signed" in params
+      assert Macro.to_string(hd(query.wheres).expr) =~ "Signed"
       assert "Ethereum" in params
       assert "transact" in params
       assert match?({:count, _, [_]}, query.select.expr)

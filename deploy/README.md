@@ -271,3 +271,21 @@ If those endpoints return empty arrays, check the sidecar is healthy:
 ```bash
 docker compose logs --tail=200 roko-indexer
 ```
+
+### Fast native user transaction total
+
+`GET /api/v2/substrate/transaction-count` returns only
+`total_native_signed_extrinsics`. The homepage adds that value to Blockscout's
+EVM transaction total; signed `Ethereum.transact` wrappers, unsigned extrinsics
+and inherents are excluded from the native contribution. Empty native history
+returns zero. The general `/api/v2/substrate/stats` endpoint retains its full
+analytics response for other consumers.
+
+The sidecar owns `idx_extrinsics_signed_count` through migration
+`0014_native_transaction_count_index.sql` in roko_network. The API uses a fixed
+Signed SQL predicate so generic prepared plans can use this small partial index.
+For an existing large database, operators can create the same index concurrently
+before deploying the API; verify `indisvalid` and a representative prepared query
+plan afterward. Later sidecar migration skips the already-created index.
+Deploy the count endpoint before the frontend that consumes it, and verify the
+combined card while the full analytics endpoint is deliberately delayed.

@@ -434,6 +434,13 @@ defmodule BlockScoutWeb.API.V2.SubstrateController do
     conn |> put_status(400) |> json(%{error: "?numbers=N1,N2,... required"})
   end
 
+  @doc "Native user transaction count without the full dashboard analytics scan."
+  @spec transaction_count(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def transaction_count(conn, _params) do
+    count = Repo.one(RokoExtrinsic.count_native_signed_query()) || 0
+    json(conn, %{total_native_signed_extrinsics: count})
+  end
+
   @doc """
   Substrate-side stats summary (S5-T8). Parallel to Blockscout's EVM-shaped
   `/api/v2/stats` (which reports `total_transactions: 0` since the chain is

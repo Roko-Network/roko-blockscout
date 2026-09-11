@@ -559,6 +559,7 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
       get("/extrinsics/recent", V2.SubstrateController, :extrinsics_recent)
       get("/extrinsics/:hash", V2.SubstrateController, :extrinsic_by_hash)
       get("/stats", V2.SubstrateController, :stats)
+      get("/transaction-count", V2.SubstrateController, :transaction_count)
       get("/search/:hash", V2.SubstrateController, :search_substrate_hash)
     end
   end

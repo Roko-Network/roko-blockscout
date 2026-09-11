@@ -91,14 +91,15 @@ defmodule Explorer.Chain.RokoExtrinsic do
   end
 
   @doc "Count signed native user transactions, excluding EVM wrapper extrinsics."
+  # Keep the fixed class literal visible to generic prepared plans so PostgreSQL
+  # can use the sidecar's partial signed-transaction index. No user input is SQL.
   def count_native_signed_query do
-    signed_class = "Signed"
     ethereum_pallet = "Ethereum"
     transact_method = "transact"
 
     from(e in __MODULE__,
       where:
-        e.extrinsic_class == ^signed_class and
+        fragment("? = 'Signed'", e.extrinsic_class) and
           not (e.pallet == ^ethereum_pallet and e.method == ^transact_method),
       select: count(e.id)
     )
